@@ -759,11 +759,44 @@ const createFragmentShaderSource = () => `
     // Calculate local position within triangle (centered)
     float triLocalX = triLocalXBase;
     float triLocalY = triLocalYBase;
-    // Distance to triangle edges
-    float triDistBottom = triLocalY;
-    float triDistLeft = triIsOdd > 0.5 ? (triLocalX + triLocalY) * 0.5 : ((1.0 - triLocalX) + triLocalY) * 0.5;
-    float triDistRight = triIsOdd > 0.5 ? ((1.0 - triLocalX) + triLocalY) * 0.5 : (triLocalX + triLocalY) * 0.5;
-    float triEdgeDist = min(triDistBottom, min(triDistLeft, triDistRight)) * 1.5;
+    
+    // Determine if this is an upward or downward pointing triangle
+    // For upward triangles: flat bottom, point at top
+    // For downward triangles: flat top, point at bottom
+    float triIsUpward = mod(triColBase + triRowIndex + triInUpper, 2.0);
+    
+    // Distance to triangle edges - calculated properly for edge effects
+    // The diagonal edges need proper signed distance for directional beveling
+    float sqrt2inv = 0.7071; // 1/sqrt(2) for 45-degree diagonals
+    
+    // For upward triangles: bottom edge is horizontal, two diagonals go up
+    // For downward triangles: top edge is horizontal, two diagonals go down
+    float triDistHorizontal, triDistDiagLeft, triDistDiagRight;
+    
+    if (triIsUpward > 0.5) {
+      // Upward pointing triangle: flat bottom at y=0, apex at top
+      triDistHorizontal = triLocalYBase; // distance to bottom edge
+      // Left diagonal: line from (0,0) to (0.5,1) - equation: y = 2x, or 2x - y = 0
+      // Distance = (2x - y) / sqrt(5) but we normalize differently
+      triDistDiagLeft = (triLocalXBase + triLocalYBase * 0.5) * sqrt2inv;
+      // Right diagonal: line from (1,0) to (0.5,1) - equation: y = -2x + 2, or 2x + y = 2
+      triDistDiagRight = ((1.0 - triLocalXBase) + triLocalYBase * 0.5) * sqrt2inv;
+    } else {
+      // Downward pointing triangle: flat top at y=1, apex at bottom
+      triDistHorizontal = 1.0 - triLocalYBase; // distance to top edge
+      // Left diagonal: from (0,1) to (0.5,0)
+      triDistDiagLeft = (triLocalXBase + (1.0 - triLocalYBase) * 0.5) * sqrt2inv;
+      // Right diagonal: from (1,1) to (0.5,0)
+      triDistDiagRight = ((1.0 - triLocalXBase) + (1.0 - triLocalYBase) * 0.5) * sqrt2inv;
+    }
+    
+    // Store individual edge distances for later use in edge effects
+    // We'll pass these through to the edge effect system
+    float triEdge1 = triDistHorizontal;
+    float triEdge2 = triDistDiagLeft;
+    float triEdge3 = triDistDiagRight;
+    
+    float triEdgeDist = min(triEdge1, min(triEdge2, triEdge3)) * 1.5;
     
     // === HEXAGON ===
     // Proper hexagonal grid
@@ -968,13 +1001,86 @@ const createFragmentShaderSource = () => `
     float topDist = 1.0 - barY;
     float bottomDist = barY;
     
-    // For non-rectangular shapes, use the computed shape edge distance
-    // This makes the glass edges follow the shape contours
-    float useShapeEdge = 1.0 - isRect;
-    if (useShapeEdge > 0.5) {
-      // Use shape-aware edge distance for all edges
-      // This creates a uniform edge effect that follows the shape
-      float shapeDist = shapeEdgeDist * 0.5; // Scale to match edge width expectations
+    // Additional edge distances for triangles (diagonals)
+    float diagLeftDist = 1.0;
+    float diagRightDist = 1.0;
+    float hasTriDiagonals = 0.0;
+    float triUpward = 0.0;
+    
+    // For triangles, use individual edge distances for proper beveling on each edge
+    if (isTri > 0.5) {
+      // Recalculate triangle parameters for edge detection
+      float triCellW = 1.0 / cols;
+      float triCellH = 1.0 / rows;
+      float tRowIdx = floor(uv.y / triCellH);
+      float tColBase = floor(uv.x / triCellW);
+      float tLocalX = fract(uv.x / triCellW);
+      float tLocalY = fract(uv.y / triCellH);
+      float tIsOdd = mod(tColBase + tRowIdx, 2.0);
+      float tDiag = tIsOdd > 0.5 ? tLocalX : (1.0 - tLocalX);
+      float tInUpper = step(tDiag, tLocalY);
+      
+      // sqrt(2)/2 for proper 45-degree distance calculation
+      float sqrt2inv = 0.7071;
+      
+      // The triangles are formed by dividing rectangles with diagonals
+      // For / diagonal (tIsOdd > 0.5): lower triangle below y=x, upper above
+      // For \ diagonal (tIsOdd <= 0.5): lower triangle below y=1-x, upper above
+      
+      if (tIsOdd > 0.5) {
+        // "/" diagonal pattern - line is y = x
+        if (tInUpper > 0.5) {
+          // Upper triangle: bounded by top (y=1), right (x=1), and diagonal (y=x)
+          topDist = (1.0 - tLocalY) * 0.9;
+          rightDist = (1.0 - tLocalX) * 0.9;
+          // Distance to diagonal y=x: |x-y|/sqrt(2), but we're above so y>x
+          diagLeftDist = (tLocalY - tLocalX) * sqrt2inv * 0.9;
+          diagRightDist = 1.0; // Not used for this triangle
+          leftDist = diagLeftDist;
+          bottomDist = 1.0;
+          triUpward = 0.0; // Upper triangles point down in this pattern
+        } else {
+          // Lower triangle: bounded by bottom (y=0), left (x=0), and diagonal (y=x)
+          bottomDist = tLocalY * 0.9;
+          leftDist = tLocalX * 0.9;
+          // Distance to diagonal: we're below so x>y
+          diagRightDist = (tLocalX - tLocalY) * sqrt2inv * 0.9;
+          diagLeftDist = 1.0;
+          rightDist = diagRightDist;
+          topDist = 1.0;
+          triUpward = 1.0; // Lower triangles point up in this pattern
+        }
+      } else {
+        // "\" diagonal pattern - line is y = 1-x (or x+y=1)
+        if (tInUpper > 0.5) {
+          // Upper triangle: bounded by top (y=1), left (x=0), and diagonal (x+y=1)
+          topDist = (1.0 - tLocalY) * 0.9;
+          leftDist = tLocalX * 0.9;
+          // Distance to diagonal x+y=1: |x+y-1|/sqrt(2), we're above so x+y>1
+          diagRightDist = (tLocalX + tLocalY - 1.0) * sqrt2inv * 0.9;
+          diagLeftDist = 1.0;
+          rightDist = diagRightDist;
+          bottomDist = 1.0;
+          triUpward = 0.0;
+        } else {
+          // Lower triangle: bounded by bottom (y=0), right (x=1), and diagonal (x+y=1)
+          bottomDist = tLocalY * 0.9;
+          rightDist = (1.0 - tLocalX) * 0.9;
+          // Distance to diagonal: we're below so x+y<1
+          diagLeftDist = (1.0 - tLocalX - tLocalY) * sqrt2inv * 0.9;
+          diagRightDist = 1.0;
+          leftDist = diagLeftDist;
+          topDist = 1.0;
+          triUpward = 1.0;
+        }
+      }
+      
+      hasTriDiagonals = 1.0;
+    }
+    
+    // For hexagon, use the computed shape edge distance
+    if (isHex > 0.5) {
+      float shapeDist = shapeEdgeDist * 0.5;
       leftDist = shapeDist;
       rightDist = shapeDist;
       topDist = shapeDist;
@@ -1041,21 +1147,69 @@ const createFragmentShaderSource = () => `
     
     // Shift red channel outward at left edge, blue at right edge
     float edgeChromaShift = edgeChromaAmt * 0.15;
-    vec2 leftChromaOffset = vec2(-edgeChromaShift * leftEdgeZone, 0.0);
-    vec2 rightChromaOffset = vec2(edgeChromaShift * rightEdgeZone, 0.0);
+    
+    // For triangles, chromatic offset should be perpendicular to the diagonal edges
+    vec2 leftChromaOffset, rightChromaOffset;
+    
+    if (hasTriDiagonals > 0.5) {
+      // For triangles: diagonal refraction directions
+      // The diagonals are at 45 degrees, so normals are at 45 degrees too
+      float diagNorm = 0.707; // 1/sqrt(2)
+      
+      // For "/" diagonal (y=x): normal is (1,-1)/sqrt(2) pointing toward lower-right
+      // For "\" diagonal (x+y=1): normal is (1,1)/sqrt(2) pointing toward upper-right
+      // We apply refraction perpendicular to the edge
+      
+      // Left edge in triangle context: either a vertical edge or a diagonal
+      // If leftDist is small and we're on a diagonal, use diagonal normal
+      // Simple heuristic: use diagonal direction for refraction on all triangle edges
+      
+      if (triUpward > 0.5) {
+        // Lower triangles (pointing up): diagonal edge has normal pointing inward
+        // "/" pattern lower: diagonal is y=x, we're below, normal points toward (1,1)
+        // "\" pattern lower: diagonal is x+y=1, we're below, normal points toward (1,-1)
+        leftChromaOffset = vec2(diagNorm, -diagNorm) * (-edgeChromaShift * leftEdgeZone);
+        rightChromaOffset = vec2(diagNorm, diagNorm) * (edgeChromaShift * rightEdgeZone);
+      } else {
+        // Upper triangles (pointing down): diagonal edge normal points other way
+        leftChromaOffset = vec2(-diagNorm, diagNorm) * (-edgeChromaShift * leftEdgeZone);
+        rightChromaOffset = vec2(-diagNorm, -diagNorm) * (edgeChromaShift * rightEdgeZone);
+      }
+    } else {
+      // For rectangles: horizontal refraction
+      leftChromaOffset = vec2(-edgeChromaShift * leftEdgeZone, 0.0);
+      rightChromaOffset = vec2(edgeChromaShift * rightEdgeZone, 0.0);
+    }
+    
     vec2 topChromaOffset = vec2(0.0, edgeChromaShift * topEdgeZone);
     vec2 bottomChromaOffset = vec2(0.0, -edgeChromaShift * bottomEdgeZone);
     
     // Sample with chromatic offset at edges
     vec3 leftEdgeColor = vec3(0.0);
-    leftEdgeColor.r = getBackgroundColor((sampleUv + leftChromaOffset + vec2(edgeRefract * 0.02 * leftEdgeZone, 0.0)) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).r;
-    leftEdgeColor.g = getBackgroundColor((sampleUv + leftChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).g;
-    leftEdgeColor.b = getBackgroundColor((sampleUv - leftChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).b;
+    if (hasTriDiagonals > 0.5) {
+      // Diagonal edge: refract along the diagonal
+      vec2 diagRefract = leftChromaOffset * edgeRefract * 0.5;
+      leftEdgeColor.r = getBackgroundColor((sampleUv + leftChromaOffset + diagRefract) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).r;
+      leftEdgeColor.g = getBackgroundColor((sampleUv + leftChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).g;
+      leftEdgeColor.b = getBackgroundColor((sampleUv - leftChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).b;
+    } else {
+      leftEdgeColor.r = getBackgroundColor((sampleUv + leftChromaOffset + vec2(edgeRefract * 0.02 * leftEdgeZone, 0.0)) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).r;
+      leftEdgeColor.g = getBackgroundColor((sampleUv + leftChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).g;
+      leftEdgeColor.b = getBackgroundColor((sampleUv - leftChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).b;
+    }
     
     vec3 rightEdgeColor = vec3(0.0);
-    rightEdgeColor.r = getBackgroundColor((sampleUv + rightChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).r;
-    rightEdgeColor.g = getBackgroundColor((sampleUv + rightChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).g;
-    rightEdgeColor.b = getBackgroundColor((sampleUv + rightChromaOffset - vec2(edgeRefract * 0.015 * rightEdgeZone, 0.0)) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).b;
+    if (hasTriDiagonals > 0.5) {
+      // Diagonal edge: refract along the diagonal
+      vec2 diagRefract = rightChromaOffset * edgeRefract * 0.5;
+      rightEdgeColor.r = getBackgroundColor((sampleUv + rightChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).r;
+      rightEdgeColor.g = getBackgroundColor((sampleUv + rightChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).g;
+      rightEdgeColor.b = getBackgroundColor((sampleUv + rightChromaOffset + diagRefract) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).b;
+    } else {
+      rightEdgeColor.r = getBackgroundColor((sampleUv + rightChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).r;
+      rightEdgeColor.g = getBackgroundColor((sampleUv + rightChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).g;
+      rightEdgeColor.b = getBackgroundColor((sampleUv + rightChromaOffset - vec2(edgeRefract * 0.015 * rightEdgeZone, 0.0)) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).b;
+    }
     
     vec3 topEdgeColor = vec3(0.0);
     topEdgeColor.r = getBackgroundColor((sampleUv + topChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).r;
