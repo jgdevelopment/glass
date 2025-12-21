@@ -9,7 +9,6 @@ import {
   Radio,
   PanelTop,
   ChevronDown,
-  Type,
 } from "lucide-react";
 import { SketchPicker, ColorResult } from "react-color";
 
@@ -80,8 +79,8 @@ interface ShaderParams {
   paneBendVariance: number;
   paneColorShift: number;
   paneDistortVariance: number;
-  // Text mask
-  textMask: string;
+  // Border shape type: 0=rectangle, 1=triangle, 2=wave, 3=zigzag, 4=hexagon
+  borderShape: number;
 }
 
 const defaultParams: ShaderParams = {
@@ -153,8 +152,8 @@ const defaultParams: ShaderParams = {
   paneBendVariance: 0.65,
   paneColorShift: 0.85,
   paneDistortVariance: 0.55,
-  // Text mask
-  textMask: "",
+  // Border shape
+  borderShape: 0,
 };
 
 const vertexShaderSource = `
@@ -206,8 +205,7 @@ const createFragmentShaderSource = () => `
   uniform float u_paneBendVariance;
   uniform float u_paneColorShift;
   uniform float u_paneDistortVariance;
-  uniform float u_useTextMask;
-  uniform sampler2D u_textTexture;
+  uniform float u_borderShape;
   
   // Internal bend/wave controls - these create the complex internal distortions
   const float INTERNAL_WAVES = 4.0; // Number of wave "folds" inside each pane (fewer for smoother curves)
@@ -508,92 +506,120 @@ const createFragmentShaderSource = () => `
     return getBackgroundColor(uv, time, 0.0);
   }
   
-  // Sample text texture with edge detection for glass pane treatment
-  // Returns: x = mask value, y = distance to left edge, z = distance to right edge, w = distance to nearest edge
-  vec4 sampleTextWithEdges(vec2 uv) {
-    float texelSize = 1.0 / 1024.0;
-    float center = texture2D(u_textTexture, uv).r;
+  // === TESSELLATION HELPER FUNCTIONS ===
+  
+  // Hexagon grid tessellation
+  // Returns: vec4(cellX, cellY, localX, localY) where local is 0-1 within hex
+  vec4 hexGrid(vec2 uv, float cols, float rows) {
+    // Hex dimensions
+    float hexWidth = 1.0 / cols;
+    float hexHeight = 1.0 / rows;
+    float hexRatio = hexWidth / hexHeight;
     
-    if (center < 0.1) {
-      return vec4(0.0, 0.0, 0.0, 0.0);
+    // Adjust for hex packing (hexes are offset every other row)
+    vec2 hexSize = vec2(hexWidth, hexHeight * 0.866);
+    
+    // First, find which row we're in
+    float row = floor(uv.y / hexSize.y);
+    float rowOffset = mod(row, 2.0) * 0.5 * hexSize.x;
+    
+    // Adjust x for row offset
+    float adjustedX = uv.x - rowOffset;
+    float col = floor(adjustedX / hexSize.x);
+    
+    // Local position within cell
+    float localX = fract(adjustedX / hexSize.x);
+    float localY = fract(uv.y / hexSize.y);
+    
+    // Check if we need to adjust for hex shape (top/bottom corners)
+    float hexSlope = 0.5; // How much the hex edges slope
+    float cornerZone = 0.25;
+    
+    // Check if in corner region and should belong to adjacent hex
+    if (localY < cornerZone) {
+      float threshold = localY / cornerZone;
+      if (localX < 0.5 - threshold * 0.5) {
+        col -= 1.0;
+        localX = fract((adjustedX - hexSize.x * col) / hexSize.x);
+      } else if (localX > 0.5 + threshold * 0.5) {
+        col += 1.0;
+        localX = fract((adjustedX - hexSize.x * col) / hexSize.x);
+      }
     }
     
-    // March in each direction to find edge distances
-    float leftDist = 0.0;
-    float rightDist = 0.0;
-    float topDist = 0.0;
-    float bottomDist = 0.0;
-    
-    // Search for edges (where we transition from inside to outside)
-    for (float i = 1.0; i <= 50.0; i += 1.0) {
-      float step = i * texelSize * 3.0;
-      
-      if (leftDist == 0.0) {
-        float sampleLeft = texture2D(u_textTexture, uv + vec2(-step, 0.0)).r;
-        if (sampleLeft < 0.5) leftDist = step;
-      }
-      if (rightDist == 0.0) {
-        float sampleRight = texture2D(u_textTexture, uv + vec2(step, 0.0)).r;
-        if (sampleRight < 0.5) rightDist = step;
-      }
-      if (topDist == 0.0) {
-        float sampleTop = texture2D(u_textTexture, uv + vec2(0.0, step)).r;
-        if (sampleTop < 0.5) topDist = step;
-      }
-      if (bottomDist == 0.0) {
-        float sampleBottom = texture2D(u_textTexture, uv + vec2(0.0, -step)).r;
-        if (sampleBottom < 0.5) bottomDist = step;
-      }
-      
-      if (leftDist > 0.0 && rightDist > 0.0 && topDist > 0.0 && bottomDist > 0.0) break;
-    }
-    
-    // Default to max distance if no edge found
-    float maxDist = 0.15;
-    if (leftDist == 0.0) leftDist = maxDist;
-    if (rightDist == 0.0) rightDist = maxDist;
-    if (topDist == 0.0) topDist = maxDist;
-    if (bottomDist == 0.0) bottomDist = maxDist;
-    
-    float nearestEdge = min(min(leftDist, rightDist), min(topDist, bottomDist));
-    
-    return vec4(center, leftDist, rightDist, nearestEdge);
+    return vec4(col, row, localX, localY);
   }
   
-  // Get normalized position within letter (0-1 from left edge to right edge)
-  vec2 getLetterLocalPos(vec2 uv) {
-    float texelSize = 1.0 / 1024.0;
+  // Compute distance to hex edge (returns 0 at edge, 1 at center)
+  float hexEdgeDist(vec2 local) {
+    // Hex center is at (0.5, 0.5)
+    vec2 centered = local - 0.5;
     
-    float leftDist = 0.0;
-    float rightDist = 0.0;
-    float topDist = 0.0;
-    float bottomDist = 0.0;
+    // Six edges of hexagon
+    float dist = 1.0;
     
-    for (float i = 1.0; i <= 60.0; i += 1.0) {
-      float step = i * texelSize * 3.0;
-      
-      if (leftDist == 0.0 && texture2D(u_textTexture, uv + vec2(-step, 0.0)).r < 0.5) leftDist = step;
-      if (rightDist == 0.0 && texture2D(u_textTexture, uv + vec2(step, 0.0)).r < 0.5) rightDist = step;
-      if (topDist == 0.0 && texture2D(u_textTexture, uv + vec2(0.0, step)).r < 0.5) topDist = step;
-      if (bottomDist == 0.0 && texture2D(u_textTexture, uv + vec2(0.0, -step)).r < 0.5) bottomDist = step;
-      
-      if (leftDist > 0.0 && rightDist > 0.0 && topDist > 0.0 && bottomDist > 0.0) break;
+    // Top and bottom edges
+    dist = min(dist, 1.0 - abs(centered.y) * 2.5);
+    
+    // Four diagonal edges
+    float diag1 = abs(centered.x * 0.866 + centered.y * 0.5);
+    float diag2 = abs(centered.x * 0.866 - centered.y * 0.5);
+    dist = min(dist, 1.0 - diag1 * 2.0);
+    dist = min(dist, 1.0 - diag2 * 2.0);
+    
+    return clamp(dist, 0.0, 1.0);
+  }
+  
+  // Triangle grid tessellation
+  // Returns: vec4(cellX, cellY, localX, localY)
+  vec4 triGrid(vec2 uv, float cols, float rows) {
+    float cellWidth = 1.0 / cols;
+    float cellHeight = 1.0 / rows;
+    
+    float row = floor(uv.y / cellHeight);
+    float col = floor(uv.x / cellWidth);
+    
+    float localX = fract(uv.x / cellWidth);
+    float localY = fract(uv.y / cellHeight);
+    
+    // Determine if upward or downward pointing triangle
+    float isUpward = mod(col + row, 2.0);
+    
+    // Check which triangle we're in
+    float diagLine = isUpward > 0.5 ? localX : (1.0 - localX);
+    float inUpper = step(diagLine, localY);
+    
+    // Adjust cell ID if in the "other" triangle
+    if (inUpper > 0.5) {
+      // We're in the upper triangle, which belongs to different cell
+      col += isUpward > 0.5 ? 0.5 : -0.5;
     }
     
-    float maxDist = 0.2;
-    if (leftDist == 0.0) leftDist = maxDist;
-    if (rightDist == 0.0) rightDist = maxDist;
-    if (topDist == 0.0) topDist = maxDist;
-    if (bottomDist == 0.0) bottomDist = maxDist;
-    
-    float totalWidth = leftDist + rightDist;
-    float totalHeight = topDist + bottomDist;
-    
-    float localX = leftDist / totalWidth;
-    float localY = bottomDist / totalHeight;
-    
-    return vec2(localX, localY);
+    return vec4(col, row, localX, localY);
   }
+  
+  // Compute distance to triangle edge
+  float triEdgeDist(vec2 local, float cellCol, float cellRow) {
+    float isUpward = mod(cellCol + cellRow, 2.0);
+    
+    vec2 centered = local - 0.5;
+    float dist = 1.0;
+    
+    // Bottom edge
+    dist = min(dist, local.y * 2.0);
+    
+    // Two diagonal edges
+    if (isUpward > 0.5) {
+      // Upward triangle: / and \\ edges meeting at top
+      dist = min(dist, (1.0 - local.y - abs(centered.x)) * 1.5);
+    } else {
+      // Downward triangle: \\ and / edges meeting at bottom  
+      dist = min(dist, (local.y - abs(centered.x)) * 1.5);
+    }
+    
+    return clamp(dist, 0.0, 1.0);
+  }
+  
   
   // === INTERNAL WAVE/BEND FUNCTION ===
   // Creates complex internal distortion patterns within each pane
@@ -696,97 +722,114 @@ const createFragmentShaderSource = () => `
     vec2 uv = gl_FragCoord.xy / u_resolution.xy;
     float aspect = u_resolution.x / u_resolution.y;
     
-    // Check if we're using text mask mode
-    float textMaskValue = 0.0;
-    float isTextMode = u_useTextMask;
-    vec4 textEdgeInfo = vec4(0.0);
-    vec2 letterLocalPos = vec2(0.5);
-    float textLeftDist = 0.0;
-    float textRightDist = 0.0;
-    float textTopDist = 0.0;
-    float textBottomDist = 0.0;
-    
-    if (isTextMode > 0.5) {
-      // Sample text texture (flip Y for correct orientation)
-      vec2 textUv = vec2(uv.x, 1.0 - uv.y);
-      textMaskValue = texture2D(u_textTexture, textUv).r;
-      
-      if (textMaskValue > 0.1) {
-        // Get local position within this letter for glass effects
-        letterLocalPos = getLetterLocalPos(textUv);
-        
-        // Get edge distances for edge effects
-        float texelSize = 1.0 / 1024.0;
-        for (float i = 1.0; i <= 60.0; i += 1.0) {
-          float step = i * texelSize * 3.0;
-          if (textLeftDist == 0.0 && texture2D(u_textTexture, textUv + vec2(-step, 0.0)).r < 0.5) textLeftDist = step;
-          if (textRightDist == 0.0 && texture2D(u_textTexture, textUv + vec2(step, 0.0)).r < 0.5) textRightDist = step;
-          if (textTopDist == 0.0 && texture2D(u_textTexture, textUv + vec2(0.0, step)).r < 0.5) textTopDist = step;
-          if (textBottomDist == 0.0 && texture2D(u_textTexture, textUv + vec2(0.0, -step)).r < 0.5) textBottomDist = step;
-          if (textLeftDist > 0.0 && textRightDist > 0.0 && textTopDist > 0.0 && textBottomDist > 0.0) break;
-        }
-        float maxDist = 0.15;
-        if (textLeftDist == 0.0) textLeftDist = maxDist;
-        if (textRightDist == 0.0) textRightDist = maxDist;
-        if (textTopDist == 0.0) textTopDist = maxDist;
-        if (textBottomDist == 0.0) textBottomDist = maxDist;
-      }
-    }
-    
     // Bar configuration
     float cols = u_cols;
     float rows = u_rows;
+    float shape = u_borderShape;
     
-    float colIndex = floor(uv.x * cols);
-    float rowIndex = floor(uv.y * rows);
+    // Shape selection flags: 0=Rectangle, 1=Triangle, 2=Hexagon
+    float isRect = 1.0 - step(0.5, shape);
+    float isTri = step(0.5, shape) * (1.0 - step(1.5, shape));
+    float isHex = step(1.5, shape);
     
-    float localX = fract(uv.x * cols);
-    float localY = fract(uv.y * rows);
+    // Calculate cell coordinates based on shape type
+    float colIndex, rowIndex, localX, localY;
+    float shapeEdgeDist = 1.0; // Distance to nearest edge (0 at edge, 1 at center)
     
-    // Bar dimensions with small gaps
-    float gapX = u_gapX;
-    float gapY = u_gapY;
-    float barMask = step(gapX, localX) * step(localX, 1.0 - gapX);
-    barMask *= step(gapY, localY) * step(localY, 1.0 - gapY);
+    // === RECTANGLE (default) ===
+    float rectColIndex = floor(uv.x * cols);
+    float rectRowIndex = floor(uv.y * rows);
+    float rectLocalX = fract(uv.x * cols);
+    float rectLocalY = fract(uv.y * rows);
+    float rectEdgeDist = min(min(rectLocalX, 1.0 - rectLocalX), min(rectLocalY, 1.0 - rectLocalY)) * 2.0;
     
-    // If using text mask, override barMask
-    if (isTextMode > 0.5) {
-      barMask = step(0.5, textMaskValue);
+    // === TRIANGLE ===
+    float triCellWidth = 1.0 / cols;
+    float triCellHeight = 1.0 / rows;
+    float triRowIndex = floor(uv.y / triCellHeight);
+    float triColBase = floor(uv.x / triCellWidth);
+    float triLocalXBase = fract(uv.x / triCellWidth);
+    float triLocalYBase = fract(uv.y / triCellHeight);
+    // Determine if upward or downward pointing based on position
+    float triIsOdd = mod(triColBase + triRowIndex, 2.0);
+    // Check which triangle within the cell
+    float triDiag = triIsOdd > 0.5 ? triLocalXBase : (1.0 - triLocalXBase);
+    float triInUpper = step(triDiag, triLocalYBase);
+    float triColIndex = triColBase + triInUpper * (triIsOdd > 0.5 ? 0.5 : -0.5);
+    // Calculate local position within triangle (centered)
+    float triLocalX = triLocalXBase;
+    float triLocalY = triLocalYBase;
+    // Distance to triangle edges
+    float triDistBottom = triLocalY;
+    float triDistLeft = triIsOdd > 0.5 ? (triLocalX + triLocalY) * 0.5 : ((1.0 - triLocalX) + triLocalY) * 0.5;
+    float triDistRight = triIsOdd > 0.5 ? ((1.0 - triLocalX) + triLocalY) * 0.5 : (triLocalX + triLocalY) * 0.5;
+    float triEdgeDist = min(triDistBottom, min(triDistLeft, triDistRight)) * 1.5;
+    
+    // === HEXAGON ===
+    // Proper hexagonal grid
+    float hexWidth = 1.0 / cols;
+    float hexHeight = 1.0 / rows * 0.866; // Adjust for hex packing
+    float hexRowIndex = floor(uv.y / hexHeight);
+    float hexRowOffset = mod(hexRowIndex, 2.0) * 0.5 * hexWidth;
+    float hexAdjustedX = uv.x - hexRowOffset;
+    float hexColIndex = floor(hexAdjustedX / hexWidth);
+    float hexLocalX = fract(hexAdjustedX / hexWidth);
+    float hexLocalY = fract(uv.y / hexHeight);
+    // Hex corner adjustment - check if in corner region
+    float hexCornerZone = 0.3;
+    float hexCornerThreshold = hexLocalY / hexCornerZone;
+    // Adjust for hex corners
+    if (hexLocalY < hexCornerZone) {
+      if (hexLocalX < 0.5 * (1.0 - hexCornerThreshold)) {
+        hexColIndex -= 1.0;
+        hexLocalX += 1.0;
+        hexRowIndex -= mod(hexRowIndex + 1.0, 2.0);
+      } else if (hexLocalX > 1.0 - 0.5 * (1.0 - hexCornerThreshold)) {
+        hexColIndex += 1.0;
+        hexLocalX -= 1.0;
+        hexRowIndex -= mod(hexRowIndex + 1.0, 2.0);
+      }
     }
+    // Hex edge distance (6 edges)
+    vec2 hexCentered = vec2(hexLocalX - 0.5, hexLocalY - 0.5);
+    float hexDistTop = 1.0 - hexLocalY;
+    float hexDistBottom = hexLocalY;
+    float hexDistDiag1 = 1.0 - abs(hexCentered.x * 1.5 + hexCentered.y);
+    float hexDistDiag2 = 1.0 - abs(hexCentered.x * 1.5 - hexCentered.y);
+    float hexDistDiag3 = 1.0 - abs(-hexCentered.x * 1.5 + hexCentered.y);
+    float hexDistDiag4 = 1.0 - abs(-hexCentered.x * 1.5 - hexCentered.y);
+    float hexEdgeDist = min(min(hexDistTop, hexDistBottom), min(min(hexDistDiag1, hexDistDiag2), min(hexDistDiag3, hexDistDiag4)));
+    hexEdgeDist = clamp(hexEdgeDist * 1.5, 0.0, 1.0);
     
-    // Glass prism refraction - cylindrical lens effect
-    float barX = (localX - gapX) / (1.0 - 2.0 * gapX);
-    float barY = (localY - gapY) / (1.0 - 2.0 * gapY);
-    barX = clamp(barX, 0.0, 1.0);
-    barY = clamp(barY, 0.0, 1.0);
+    // Select values based on shape type
+    colIndex = rectColIndex * isRect + triColIndex * isTri + hexColIndex * isHex;
+    rowIndex = rectRowIndex * isRect + triRowIndex * isTri + hexRowIndex * isHex;
+    localX = rectLocalX * isRect + triLocalX * isTri + hexLocalX * isHex;
+    localY = rectLocalY * isRect + triLocalY * isTri + hexLocalY * isHex;
+    shapeEdgeDist = rectEdgeDist * isRect + triEdgeDist * isTri + hexEdgeDist * isHex;
+    shapeEdgeDist = clamp(shapeEdgeDist, 0.0, 1.0);
     
-    // For text mode, use the local position within the letter
-    if (isTextMode > 0.5 && textMaskValue > 0.1) {
-      barX = letterLocalPos.x;
-      barY = letterLocalPos.y;
-    }
+    // No black gaps - barMask is always 1.0 (cells tile seamlessly)
+    float barMask = 1.0;
+    
+    // Glass prism refraction - use local coordinates
+    float barX = clamp(localX, 0.0, 1.0);
+    float barY = clamp(localY, 0.0, 1.0);
     
     // Glass thickness - stronger cylindrical lens
     float centerDist = (barX - 0.5) * 2.0; // -1 to 1
     float glassProfile = 1.0 - centerDist * centerDist;
+    
+    // For non-rectangular shapes, use shape edge distance for glass profile
+    // This makes the glass thicker in center, thinner at edges following the shape
+    float shapeGlassProfile = shapeEdgeDist * shapeEdgeDist;
+    glassProfile = mix(glassProfile, shapeGlassProfile, 1.0 - isRect);
     
     // === PER-PANE VARIATION ===
     vec2 paneRand = paneHash2(colIndex, rowIndex);
     float paneRand3 = paneHash(colIndex + 100.0, rowIndex + 50.0);
     float paneRand4 = paneHash(colIndex + 200.0, rowIndex + 150.0);
     float paneRand5 = paneHash(colIndex + 300.0, rowIndex + 250.0);
-    
-    // For text mode, use letter-local position for consistent color within each letter
-    // but different colors across letters based on screen position
-    if (isTextMode > 0.5 && textMaskValue > 0.1) {
-      // Use coarse UV grid to get consistent hash per letter region
-      float letterGridX = floor(uv.x * 8.0);
-      float letterGridY = floor(uv.y * 4.0);
-      paneRand = paneHash2(letterGridX, letterGridY);
-      paneRand3 = paneHash(letterGridX + 100.0, letterGridY + 50.0);
-      paneRand4 = paneHash(letterGridX + 200.0, letterGridY + 150.0);
-      paneRand5 = paneHash(letterGridX + 300.0, letterGridY + 250.0);
-    }
     
     // Per-pane bend direction and strength
     float paneBendDir = (paneRand.x - 0.5) * 2.0; // -1 to 1
@@ -799,11 +842,6 @@ const createFragmentShaderSource = () => `
     // This is the key to getting different colors in each pane like the reference
     float paneColorOffset = colIndex / cols * 2.0 + paneRand.x * 1.5 + paneRand.y * 0.8;
     paneColorOffset += rowIndex * 0.3; // Also vary by row
-    
-    // For text mode, use UV position for color variation across the text
-    if (isTextMode > 0.5 && textMaskValue > 0.1) {
-      paneColorOffset = uv.x * 3.0 + uv.y * 0.8 + paneRand.x * 0.3;
-    }
     
     float paneHueShift = paneColorOffset * u_paneColorShift;
     
@@ -924,21 +962,23 @@ const createFragmentShaderSource = () => `
     vec3 coolHighlight = vec3(0.85, 0.92, 1.0);
     vec3 whiteHighlight = vec3(1.0, 1.0, 1.0);
     
-    // Edge distances - for text mode, use actual distances to letter edges
+    // Edge distances - for non-rectangle shapes, use shape-aware edge distance
     float leftDist = barX;
     float rightDist = 1.0 - barX;
     float topDist = 1.0 - barY;
     float bottomDist = barY;
     
-    // For text mode, use the measured edge distances normalized for edge effects
-    if (isTextMode > 0.5 && textMaskValue > 0.1) {
-      // Scale the edge distances to work with the edge effect system
-      // The edge width parameter controls how wide the edge effects are
-      float edgeScale = 15.0; // Scale factor to make edges visible
-      leftDist = textLeftDist * edgeScale;
-      rightDist = textRightDist * edgeScale;
-      topDist = textTopDist * edgeScale;
-      bottomDist = textBottomDist * edgeScale;
+    // For non-rectangular shapes, use the computed shape edge distance
+    // This makes the glass edges follow the shape contours
+    float useShapeEdge = 1.0 - isRect;
+    if (useShapeEdge > 0.5) {
+      // Use shape-aware edge distance for all edges
+      // This creates a uniform edge effect that follows the shape
+      float shapeDist = shapeEdgeDist * 0.5; // Scale to match edge width expectations
+      leftDist = shapeDist;
+      rightDist = shapeDist;
+      topDist = shapeDist;
+      bottomDist = shapeDist;
     }
     
     // === 3D BEVELED FRAME EFFECT ===
@@ -1113,7 +1153,22 @@ const createFragmentShaderSource = () => `
     caustic = pow(caustic, 2.5) * glassProfile * 0.025 * u_causticIntensity;
     col += whiteHighlight * caustic;
     
-    // Gap between bars - very dark (nearly black)
+    // Edge lines between cells - follows the shape contours
+    // Use shapeEdgeDist to create edge effects that match the tessellation shape
+    float edgeLineWidth = u_gapX * 2.0 + 0.01; // Edge line width based on gap setting
+    float edgeLine = 1.0 - smoothstep(0.0, edgeLineWidth, shapeEdgeDist);
+    
+    // Edge color - subtle dark line with warm/cool tints
+    vec3 edgeLineColor = mix(
+      vec3(0.02, 0.02, 0.03), // Dark base
+      mix(warmOrange * 0.3, coolHighlight * 0.3, barX), // Warm/cool tint based on position
+      0.3
+    );
+    
+    // Apply edge line
+    col = mix(col, edgeLineColor, edgeLine * 0.7);
+    
+    // Gap between bars
     vec3 gapColor = vec3(0.002, 0.003, 0.008);
     col = mix(gapColor, col, barMask);
     
@@ -1135,7 +1190,6 @@ interface ControlPanelProps {
   onChange: (params: ShaderParams) => void;
   onReset: () => void;
   onSave: () => void;
-  onTextChange: (text: string) => void;
 }
 
 // Helper to convert RGB (0-1) to hex
@@ -1336,6 +1390,23 @@ function ColorPicker({ colorR, colorG, colorB, onChange }: ColorPickerProps) {
               "#C850A0", "#00CCC0", "#8B5CF6", "#FFFFFF",
               "#000000", "#FF6B6B", "#4ECDC4", "#45B7D1",
             ]}
+            styles={{
+              default: {
+                picker: {
+                  background: "#1a1a1a",
+                  boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)",
+                },
+                saturation: {
+                  borderRadius: "4px 4px 0 0",
+                },
+                hue: {
+                  borderRadius: "2px",
+                },
+                activeColor: {
+                  boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.1)",
+                },
+              },
+            }}
           />
         </div>
       )}
@@ -1362,11 +1433,11 @@ function paramsEqual(a: ShaderParams, b: ShaderParams): boolean {
   return true;
 }
 
-function ControlPanel({ params, onChange, onReset, onSave, onTextChange }: ControlPanelProps) {
+function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) {
   // Track hydration to prevent position jank on reload
   const [isHydrated, setIsHydrated] = useState(false);
   const [isCollapsedState, setIsCollapsedState] = useState(false);
-  const [activeSection, setActiveSection] = useState<string>("text");
+  const [activeSection, setActiveSection] = useState<string>("colors");
   const [corner, setCornerState] = useState<Corner>("top-right");
   
   // Load saved corner and collapsed state on mount, then mark as hydrated
@@ -1589,7 +1660,6 @@ function ControlPanel({ params, onChange, onReset, onSave, onTextChange }: Contr
   ];
   
   const sections = [
-    { id: "text", label: "Text", icon: Type },
     { id: "colors", label: "Colors", icon: Palette },
     { id: "grid", label: "Grid", icon: Grid3X3 },
     { id: "glass", label: "Glass", icon: Gem },
@@ -1878,69 +1948,6 @@ function ControlPanel({ params, onChange, onReset, onSave, onTextChange }: Contr
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* Text Input Section */}
-            {activeSection === "text" && (
-              <div style={{ position: "relative" }}>
-                <input
-                  type="text"
-                  value={params.textMask}
-                  onChange={(e) => onTextChange(e.target.value)}
-                  placeholder="Enter text"
-                  style={{
-                    width: "100%",
-                    padding: "8px 32px 8px 10px",
-                    fontSize: 13,
-                    fontFamily: "monospace",
-                    background: "rgba(255, 255, 255, 0.08)",
-                    border: "1px solid rgba(255, 255, 255, 0.15)",
-                    borderRadius: 6,
-                    color: "rgba(255, 255, 255, 0.95)",
-                    outline: "none",
-                    transition: "all 150ms ease",
-                    boxSizing: "border-box",
-                  }}
-                  onFocus={(e) => {
-                    e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.4)";
-                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.12)";
-                  }}
-                  onBlur={(e) => {
-                    e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.15)";
-                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
-                  }}
-                />
-                {params.textMask && (
-                  <button
-                    onClick={() => onTextChange("")}
-                    style={{
-                      position: "absolute",
-                      right: 8,
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      padding: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      background: "transparent",
-                      border: "none",
-                      color: "rgba(255, 255, 255, 0.4)",
-                      cursor: "pointer",
-                      transition: "color 150ms ease",
-                      fontSize: 16,
-                      lineHeight: 1,
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.color = "rgba(255, 255, 255, 0.8)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.color = "rgba(255, 255, 255, 0.4)";
-                    }}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            )}
-            
             {/* Color Pickers Grid for Colors Section */}
             {activeSection === "colors" && (
               <div
@@ -1967,10 +1974,93 @@ function ControlPanel({ params, onChange, onReset, onSave, onTextChange }: Contr
                 ))}
               </div>
             )}
-            
+
+            {/* Grid Section - Shape dropdown and size controls */}
+            {activeSection === "grid" && (
+              <div style={{ marginBottom: 14 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "rgba(255, 255, 255, 0.5)",
+                    marginBottom: 6,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                  }}
+                >
+                  Shape
+                </div>
+                <select
+                  value={params.borderShape}
+                  onChange={(e) => onChange({ ...params, borderShape: Number(e.target.value) })}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    fontSize: 13,
+                    background: "rgba(255, 255, 255, 0.08)",
+                    border: "1px solid rgba(255, 255, 255, 0.15)",
+                    borderRadius: 6,
+                    color: "rgba(255, 255, 255, 0.95)",
+                    cursor: "pointer",
+                    outline: "none",
+                    appearance: "none",
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.6)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+                    backgroundRepeat: "no-repeat",
+                    backgroundPosition: "right 10px center",
+                    paddingRight: 30,
+                  }}
+                >
+                  <option value={0} style={{ background: "#1a1a1a", color: "#fff" }}>Rectangle</option>
+                  <option value={1} style={{ background: "#1a1a1a", color: "#fff" }}>Triangle</option>
+                  <option value={2} style={{ background: "#1a1a1a", color: "#fff" }}>Hexagon</option>
+                </select>
+              </div>
+            )}
+
+            {/* Size slider for non-rectangle shapes */}
+            {activeSection === "grid" && params.borderShape !== 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 6,
+                  }}
+                >
+                  <span style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.7)" }}>Size</span>
+                  <span style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.4)", fontFamily: "monospace" }}>
+                    {params.cols}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={4}
+                  max={60}
+                  step={1}
+                  value={params.cols}
+                  onChange={(e) => {
+                    const size = Number(e.target.value);
+                    onChange({ ...params, cols: size, rows: Math.round(size * 0.3) });
+                  }}
+                  style={{
+                    width: "100%",
+                    height: 4,
+                    background: `linear-gradient(to right, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.4) ${((params.cols - 4) / 56) * 100}%, rgba(255, 255, 255, 0.1) ${((params.cols - 4) / 56) * 100}%, rgba(255, 255, 255, 0.1) 100%)`,
+                    borderRadius: 2,
+                    cursor: "pointer",
+                  }}
+                />
+              </div>
+            )}
+
             {/* Slider Controls - Emil Kowalski: Spring-like slider interactions */}
             {controls
-              .filter(({ section }) => section === activeSection)
+              .filter(({ section, key }) => {
+                if (section !== activeSection) return false;
+                // Hide cols and rows for non-rectangle shapes (use Size slider instead)
+                if (params.borderShape !== 0 && (key === "cols" || key === "rows")) return false;
+                return true;
+              })
               .map(({ key, label, min, max, step }) => (
                 <div key={key}>
                   <div
@@ -2151,7 +2241,24 @@ function ControlPanel({ params, onChange, onReset, onSave, onTextChange }: Contr
         .color-picker-wrapper:active {
           transform: scale(0.98);
         }
-        
+
+        /* Force dark mode for react-color SketchPicker */
+        .sketch-picker {
+          background: #1a1a1a !important;
+        }
+        .sketch-picker input {
+          background: #2a2a2a !important;
+          color: #ffffff !important;
+          border: 1px solid rgba(255, 255, 255, 0.1) !important;
+          box-shadow: none !important;
+        }
+        .sketch-picker label {
+          color: rgba(255, 255, 255, 0.6) !important;
+        }
+        .sketch-picker span {
+          color: rgba(255, 255, 255, 0.6) !important;
+        }
+
         /* Slider thumb with enhanced interactions */
         input[type="range"] {
           transition: opacity 150ms var(--ease-out-expo);
@@ -2299,83 +2406,13 @@ export default function GlassBarShader() {
   const programRef = useRef<WebGLProgram | null>(null);
   const glRef = useRef<WebGLRenderingContext | null>(null);
   const uniformLocationsRef = useRef<Record<string, WebGLUniformLocation | null>>({});
-  const textTextureRef = useRef<WebGLTexture | null>(null);
-  const textCanvasRef = useRef<HTMLCanvasElement | null>(null);
   
   const [params, setParams] = useState<ShaderParams>(defaultParams);
-
-  // Function to render text to canvas and update texture
-  const updateTextTexture = useCallback((text: string) => {
-    const gl = glRef.current;
-    if (!gl || !textTextureRef.current) return;
-
-    // Create or get the text rendering canvas
-    if (!textCanvasRef.current) {
-      textCanvasRef.current = document.createElement("canvas");
-    }
-    const textCanvas = textCanvasRef.current;
-    const ctx = textCanvas.getContext("2d");
-    if (!ctx) return;
-
-    // Set canvas size to match the main canvas
-    const mainCanvas = canvasRef.current;
-    if (!mainCanvas) return;
-    
-    // Use a reasonable resolution for the text texture
-    const texWidth = Math.min(2048, mainCanvas.width);
-    const texHeight = Math.min(2048, mainCanvas.height);
-    textCanvas.width = texWidth;
-    textCanvas.height = texHeight;
-
-    // Clear canvas
-    ctx.fillStyle = "black";
-    ctx.fillRect(0, 0, texWidth, texHeight);
-
-    if (text) {
-      // Calculate font size to fill the canvas nicely
-      ctx.fillStyle = "white";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      
-      // Start with a large font and scale to fit
-      let fontSize = Math.min(texWidth, texHeight) * 0.6;
-      ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
-      
-      // Measure text and adjust font size if needed
-      let metrics = ctx.measureText(text);
-      const maxWidth = texWidth * 0.9;
-      
-      if (metrics.width > maxWidth) {
-        fontSize = fontSize * (maxWidth / metrics.width);
-        ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
-        metrics = ctx.measureText(text);
-      }
-      
-      // Draw the text centered
-      ctx.fillText(text, texWidth / 2, texHeight / 2);
-    }
-
-    // Upload to WebGL texture
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, textTextureRef.current);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, textCanvas);
-  }, []);
-
-  const handleTextChange = useCallback((text: string) => {
-    setParams(prev => ({ ...prev, textMask: text }));
-    updateTextTexture(text);
-  }, [updateTextTexture]);
 
   useEffect(() => {
     const savedParams = loadSavedParams();
     setParams(savedParams);
-    // Update text texture with saved text after a small delay to ensure WebGL is ready
-    if (savedParams.textMask) {
-      setTimeout(() => {
-        updateTextTexture(savedParams.textMask);
-      }, 100);
-    }
-  }, [updateTextTexture]);
+  }, []);
 
   const handleReset = useCallback(() => {
     const saved = loadSavedParams();
@@ -2481,21 +2518,8 @@ export default function GlassBarShader() {
       paneBendVariance: gl.getUniformLocation(program, "u_paneBendVariance"),
       paneColorShift: gl.getUniformLocation(program, "u_paneColorShift"),
       paneDistortVariance: gl.getUniformLocation(program, "u_paneDistortVariance"),
-      useTextMask: gl.getUniformLocation(program, "u_useTextMask"),
-      textTexture: gl.getUniformLocation(program, "u_textTexture"),
+      borderShape: gl.getUniformLocation(program, "u_borderShape"),
     };
-    
-    // Create text texture
-    const textTexture = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, textTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    // Initialize with empty 1x1 texture
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
-    textTextureRef.current = textTexture;
 
     function resize() {
       if (!canvas || !gl) return;
@@ -2582,8 +2606,7 @@ export default function GlassBarShader() {
     gl.uniform1f(locs.paneBendVariance, params.paneBendVariance);
     gl.uniform1f(locs.paneColorShift, params.paneColorShift);
     gl.uniform1f(locs.paneDistortVariance, params.paneDistortVariance);
-    gl.uniform1f(locs.useTextMask, params.textMask ? 1.0 : 0.0);
-    gl.uniform1i(locs.textTexture, 0); // Texture unit 0
+    gl.uniform1f(locs.borderShape, params.borderShape);
   }, [params]);
 
   return (
@@ -2598,7 +2621,7 @@ export default function GlassBarShader() {
           height: "100%",
         }}
       />
-      <ControlPanel params={params} onChange={setParams} onReset={handleReset} onSave={handleSave} onTextChange={handleTextChange} />
+      <ControlPanel params={params} onChange={setParams} onReset={handleReset} onSave={handleSave} />
     </>
   );
 }
