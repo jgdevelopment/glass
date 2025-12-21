@@ -86,23 +86,23 @@ const defaultParams: ShaderParams = {
   cols: 18,
   rows: 3,
   // Glass refraction effects - dramatic bending like reference
-  refractionStrength: 0.22,
-  chromaStrength: 0.02,
-  speed: 0.5,
-  noiseScale: 0.3,
-  saturation: 1.55,
-  brightness: 1.08,
-  glassEdgeIntensity: 1.6,
+  refractionStrength: 0.35,
+  chromaStrength: 0.03,
+  speed: 0.3,
+  noiseScale: 0.4,
+  saturation: 1.5,
+  brightness: 1.05,
+  glassEdgeIntensity: 0.7,
   causticIntensity: 1.5,
   vignetteStrength: 0.02,
   edgeHardness: 0.85,
   shimmerIntensity: 0.3,
-  // Edge effects - thick warm beveled borders like reference
-  edgeWidth: 0.04,
-  edgeWarmth: 1.8,
-  edgeRefraction: 1.0,
-  edgeBevelDepth: 1.0,
-  edgeChroma: 0.8,
+  // Edge effects - subtle warm beveled borders like reference
+  edgeWidth: 0.025,
+  edgeWarmth: 1.0,
+  edgeRefraction: 0.5,
+  edgeBevelDepth: 0.5,
+  edgeChroma: 0.3,
   // Noise texture - subtle film grain
   noiseTextureDensity: 800.0,
   noiseTextureIntensity: 0.08,
@@ -202,9 +202,9 @@ const createFragmentShaderSource = () => `
   uniform float u_borderShape;
   
   // Internal bend/wave controls - these create the complex internal distortions
-  const float INTERNAL_WAVES = 2.5; // Number of wave "folds" inside each pane (fewer for smoother curves)
-  const float WAVE_AMPLITUDE = 0.65; // How much each wave bends the image
-  const float WAVE_SHARPNESS = 1.0; // How sharp/defined the wave edges are (smoother for organic curves)
+  const float INTERNAL_WAVES = 1.5; // Few waves for smoother, longer curves
+  const float WAVE_AMPLITUDE = 1.2; // Strong bending for dramatic curves
+  const float WAVE_SHARPNESS = 0.6; // Smooth wave edges
   
   // Hash function for noise texture (high frequency grain)
   float hash(vec2 p) {
@@ -389,37 +389,37 @@ const createFragmentShaderSource = () => `
     // Start with black base
     vec3 col = black;
     
-    // === CYAN REGIONS (very prominent, major color in reference) ===
-    float cyanZone = hardStep(0.3, t1, edgeSoft) * hardStep(0.25, t2, edgeSoft);
-    cyanZone = max(cyanZone, hardStep(0.35, t2, edgeSoft) * hardStep(0.3, t3, edgeSoft));
-    cyanZone = max(cyanZone, hardStep(0.32, t5, edgeSoft) * hardStep(0.28, t1, edgeSoft));
-    cyanZone *= (1.0 - hardStep(0.72, t4, edgeSoft * 0.5)); // Not where it's too warm
-    col = mix(col, cyan * 0.6, hardStep(0.15, t1, edgeSoft) * 0.4);
-    col = mix(col, cyan * 0.85, cyanZone * 0.85);
-    col = mix(col, cyan, cyanZone * hardStep(0.4, t1, edgeSoft));
-    col = mix(col, mix(cyan, white, 0.2), cyanZone * hardStep(0.55, t3, 0.08));
+    // === CYAN REGIONS (prominent but balanced) ===
+    float cyanZone = hardStep(0.35, t1, edgeSoft) * hardStep(0.3, t2, edgeSoft);
+    cyanZone = max(cyanZone, hardStep(0.4, t2, edgeSoft) * hardStep(0.35, t3, edgeSoft));
+    cyanZone *= (1.0 - hardStep(0.65, t4, edgeSoft * 0.5)); // Not where it's warm
+    col = mix(col, cyan * 0.5, hardStep(0.2, t1, edgeSoft) * 0.3);
+    col = mix(col, cyan * 0.8, cyanZone * 0.7);
+    col = mix(col, cyan, cyanZone * hardStep(0.45, t1, edgeSoft) * 0.8);
+    col = mix(col, mix(cyan, white, 0.25), cyanZone * hardStep(0.6, t3, 0.08) * 0.6);
     
-    // === DEEP BLUE REGIONS (right side tendency) ===
-    float blueZone = hardStep(0.4, t3, edgeSoft) * hardStep(0.35, t2, edgeSoft);
-    blueZone *= (1.0 - cyanZone * 0.4);
-    blueZone *= (1.0 - hardStep(0.7, t4, edgeSoft * 0.5)); // Not where it's very warm
-    col = mix(col, deepBlue * 0.5, hardStep(0.2, t3, edgeSoft) * 0.4);
-    col = mix(col, deepBlue * 0.8, blueZone * 0.7);
-    col = mix(col, deepBlue, blueZone * hardStep(0.5, t3, edgeSoft));
+    // === DEEP BLUE REGIONS (more prominent) ===
+    float blueZone = hardStep(0.35, t3, edgeSoft) * hardStep(0.3, t2, edgeSoft);
+    blueZone = max(blueZone, hardStep(0.38, t5, edgeSoft) * hardStep(0.32, t1, edgeSoft));
+    blueZone *= (1.0 - cyanZone * 0.35);
+    blueZone *= (1.0 - hardStep(0.65, t4, edgeSoft * 0.5)); // Not where it's very warm
+    col = mix(col, deepBlue * 0.4, hardStep(0.18, t3, edgeSoft) * 0.5);
+    col = mix(col, deepBlue * 0.75, blueZone * 0.8);
+    col = mix(col, deepBlue, blueZone * hardStep(0.45, t3, edgeSoft));
     
-    // === RED/VERMILLION REGIONS (scattered, blending to orange) ===
-    float redZone = hardStep(0.48, t4, edgeSoft) * (1.0 - hardStep(0.52, t1, edgeSoft));
-    redZone *= hardStep(0.42, t5, edgeSoft);
-    redZone *= (1.0 - cyanZone * 0.55) * (1.0 - blueZone * 0.45);
-    col = mix(col, red * 0.75, redZone * 0.45);
-    col = mix(col, mix(red, orange, 0.3), redZone * hardStep(0.52, t4, edgeSoft) * 0.85);
+    // === RED/VERMILLION REGIONS (more prominent) ===
+    float redZone = hardStep(0.42, t4, edgeSoft) * (1.0 - hardStep(0.55, t1, edgeSoft));
+    redZone = max(redZone, hardStep(0.45, t5, edgeSoft) * hardStep(0.4, t4, edgeSoft));
+    redZone *= (1.0 - cyanZone * 0.5) * (1.0 - blueZone * 0.4);
+    col = mix(col, red * 0.7, redZone * 0.6);
+    col = mix(col, mix(red, orange, 0.35), redZone * hardStep(0.5, t4, edgeSoft) * 0.9);
     
-    // === ORANGE REGIONS (warm spots, more controlled - less solid) ===
-    float orangeZone = hardStep(0.55, t4, edgeSoft) * hardStep(0.52, t5, edgeSoft);
-    orangeZone *= (1.0 - cyanZone * 0.75) * (1.0 - blueZone * 0.6);
-    orangeZone *= hardStep(0.4, t2, edgeSoft); // More restricted
-    col = mix(col, orange, orangeZone * 0.55);
-    col = mix(col, mix(orange, yellow, 0.35), orangeZone * hardStep(0.58, t2, edgeSoft) * 0.8);
+    // === ORANGE REGIONS (more visible) ===
+    float orangeZone = hardStep(0.5, t4, edgeSoft) * hardStep(0.48, t5, edgeSoft);
+    orangeZone *= (1.0 - cyanZone * 0.6) * (1.0 - blueZone * 0.5);
+    orangeZone *= hardStep(0.35, t2, edgeSoft);
+    col = mix(col, orange, orangeZone * 0.7);
+    col = mix(col, mix(orange, yellow, 0.4), orangeZone * hardStep(0.55, t2, edgeSoft) * 0.85);
     
     // === YELLOW/GOLD REGIONS (bright warm highlights, subtle) ===
     float yellowZone = hardStep(0.6, t4, edgeSoft) * hardStep(0.55, t5, edgeSoft);
@@ -616,76 +616,39 @@ const createFragmentShaderSource = () => `
   
   
   // === INTERNAL WAVE/BEND FUNCTION ===
-  // Creates complex internal distortion patterns within each pane
-  // Simulates the organic flowing curves seen in real fluted glass
+  // Creates smooth flowing vertical curves like real fluted glass
+  // Colors should flow vertically with gentle horizontal displacement
   vec2 getInternalWaveDistortion(float barX, float barY, float paneRand1, float paneRand2, float paneRand3) {
     vec2 distort = vec2(0.0);
     
     // Phase offset per pane for variety
     float phaseOffset = paneRand2 * 6.28318;
-    float wavePhase2 = paneRand3 * 6.28318;
-    float wavePhase3 = paneRand1 * 6.28318;
     
-    // The distortion is strongest in the middle of the pane (cylindrical lens effect)
-    // Use smoother profile for more organic look
-    float centerWeight = 1.0 - pow(abs(barX - 0.5) * 2.0, 1.5);
-    centerWeight = max(0.0, centerWeight);
-    centerWeight = pow(centerWeight, 0.8); // Softer falloff
+    // Cylindrical lens effect - strongest in center of bar
+    // This is the key - creates smooth horizontal displacement
+    float centerDist = barX - 0.5; // -0.5 to 0.5
+    float lensStrength = 1.0 - abs(centerDist) * 2.0;
+    lensStrength = max(0.0, lensStrength);
+    lensStrength = pow(lensStrength, 0.7); // Softer profile
     
-    // === PRIMARY SWEEPING CURVES ===
-    // Large, slow-moving curves that dominate the visual
-    float mainWaveFreq = 0.8 + paneRand1 * 0.6;
-    float mainWave = sin(barY * mainWaveFreq * 3.14159 + phaseOffset);
-    // Add amplitude modulation for organic feel
-    float ampMod = 0.6 + 0.4 * sin(barY * 0.3 + paneRand2 * 3.0);
-    mainWave *= ampMod;
-    distort.x += mainWave * WAVE_AMPLITUDE * 1.2 * centerWeight;
+    // === PRIMARY CYLINDRICAL LENS (horizontal displacement) ===
+    // This is the main effect - shifts horizontally based on position in bar
+    distort.x = centerDist * WAVE_AMPLITUDE * 0.6;
     
-    // === SECONDARY FLOWING WAVE ===
-    // Medium frequency for complexity
-    float secWaveFreq = 1.5 + paneRand2 * 0.8;
-    float secWave = sin(barY * secWaveFreq * 3.14159 + wavePhase2);
-    secWave *= (0.5 + 0.5 * cos(barY * 0.8 + paneRand1 * 4.0));
-    distort.x += secWave * WAVE_AMPLITUDE * 0.7 * centerWeight;
+    // === GENTLE VERTICAL WAVE MODULATION ===
+    // Subtle variation along the vertical axis
+    float vMod = sin(barY * 1.5 * 3.14159 + phaseOffset) * 0.3;
+    vMod += sin(barY * 0.8 * 3.14159 + paneRand1 * 5.0) * 0.2;
+    distort.x *= (1.0 + vMod);
     
-    // === TERTIARY SUBTLE WAVE ===
-    float terWaveFreq = 2.5 + paneRand3 * 1.0;
-    float terWave = sin(barY * terWaveFreq * 3.14159 + wavePhase3);
-    terWave *= smoothstep(0.0, 0.5, barY) * smoothstep(1.0, 0.5, barY); // Fade at edges
-    distort.x += terWave * WAVE_AMPLITUDE * 0.35 * centerWeight;
+    // === PER-PANE BEND DIRECTION ===
+    // Some bars bend slightly left, some right
+    float bendBias = (paneRand1 - 0.5) * 0.15 * WAVE_AMPLITUDE;
+    distort.x += bendBias * lensStrength;
     
-    // === LOCALIZED BULGE DISTORTIONS ===
-    // Create smooth "bulge" regions - these cause the dramatic S-curves
-    float bulge1Y = paneRand1 * 0.6 + 0.2;
-    float bulge2Y = paneRand2 * 0.6 + 0.2;
-    float bulge3Y = paneRand3 * 0.4 + 0.3;
-    
-    // Smooth gaussian-like bulges with varying widths
-    float bulge1 = exp(-pow((barY - bulge1Y) * 2.0, 2.0)) * (paneRand3 - 0.5) * 2.0;
-    float bulge2 = exp(-pow((barY - bulge2Y) * 2.5, 2.0)) * (paneRand1 - 0.5) * 2.0;
-    float bulge3 = exp(-pow((barY - bulge3Y) * 3.0, 2.0)) * (paneRand2 - 0.5) * 2.0;
-    
-    distort.x += (bulge1 + bulge2 * 0.8 + bulge3 * 0.5) * WAVE_AMPLITUDE * 0.9 * centerWeight;
-    
-    // === HORIZONTAL WAVE (creates the S-bend appearance) ===
-    // This is key to getting the horizontal bending in the reference
-    float hWave = sin(barX * 3.14159 * 2.0 + paneRand1 * 5.0) * sin(barY * 2.0 + paneRand2 * 4.0);
-    distort.x += hWave * WAVE_AMPLITUDE * 0.4 * centerWeight;
-    
-    // === VERTICAL FLOW ===
-    // Subtle vertical shift that varies with horizontal position
-    float vWave = sin(barY * 2.0 * 3.14159 + paneRand2 * 8.0);
-    vWave *= sin(barX * 3.14159); // Stronger in center
-    distort.y += vWave * WAVE_AMPLITUDE * 0.35 * centerWeight;
-    
-    // === ORGANIC VARIATION ===
-    // Smooth low-frequency noise for natural imperfection
-    float noise1 = sin(barX * 3.0 + barY * 5.0 + paneRand1 * 30.0) * 0.5;
-    noise1 += sin(barX * 1.5 + barY * 2.5 + paneRand2 * 20.0) * 0.5;
-    float noise2 = sin(barX * 4.0 + barY * 2.0 + paneRand2 * 40.0);
-    
-    distort.x += noise1 * 0.08 * centerWeight;
-    distort.y += noise2 * 0.04 * centerWeight;
+    // === SUBTLE VERTICAL STRETCH ===
+    float vStretch = sin(barY * 2.0 * 3.14159 + paneRand2 * 4.0);
+    distort.y = vStretch * WAVE_AMPLITUDE * 0.08 * lensStrength;
     
     return distort;
   }
@@ -1314,47 +1277,41 @@ const createFragmentShaderSource = () => `
     caustic = pow(caustic, 2.5) * glassProfile * 0.025 * u_causticIntensity;
     col += whiteHighlight * caustic;
     
-    // === REALISTIC GLASS BEVEL EDGES ===
-    // Thick warm amber bevels on left/bottom edges like the reference image
-    // Creates the distinctive glass bar look with no dark gaps
+    // === SUBTLE GLASS BEVEL EDGES ===
+    // Gentle warm glow on left/bottom edges like real glass refraction
     
-    float bevelEdgeWidth = u_edgeWidth * 3.5; // Thicker bevels
+    float bevelEdgeWidth = u_edgeWidth * 2.5;
     
-    // Left edge - strong warm amber glow (primary highlight like reference)
+    // Left edge - subtle warm amber glow
     float leftBevelGlow = smoothstep(bevelEdgeWidth, 0.0, leftDist);
-    leftBevelGlow = pow(leftBevelGlow, 0.5); // Softer falloff for wider glow
-    vec3 leftBevelColor = mix(warmOrange, amber, 0.4);
-    col = mix(col, leftBevelColor, leftBevelGlow * 0.75 * edgeIntensity * warmth);
+    leftBevelGlow = pow(leftBevelGlow, 0.6);
+    vec3 leftBevelColor = mix(warmOrange, amber, 0.5);
+    col = mix(col, leftBevelColor, leftBevelGlow * 0.35 * edgeIntensity * warmth);
     
-    // Add additive glow for more brightness at edge
-    col += leftBevelColor * pow(leftBevelGlow, 1.5) * 0.25 * edgeIntensity * warmth;
+    // Thin bright line at the very edge
+    float leftEdgeLine = smoothstep(bevelEdgeWidth * 0.15, 0.0, leftDist);
+    leftEdgeLine = pow(leftEdgeLine, 0.4);
+    col += vec3(1.0, 0.95, 0.85) * leftEdgeLine * 0.25 * edgeIntensity;
     
-    // Right edge - subtle cool highlight (less prominent than left)
-    float rightBevelGlow = smoothstep(bevelEdgeWidth * 0.5, 0.0, rightDist);
+    // Right edge - very subtle cool highlight
+    float rightBevelGlow = smoothstep(bevelEdgeWidth * 0.4, 0.0, rightDist);
     rightBevelGlow = pow(rightBevelGlow, 0.7);
-    col = mix(col, coolHighlight, rightBevelGlow * 0.18 * edgeIntensity);
+    col = mix(col, coolHighlight, rightBevelGlow * 0.12 * edgeIntensity);
     
     // Top edge - subtle cool tint
-    float topBevelGlow = smoothstep(bevelEdgeWidth * 0.4, 0.0, topDist);
+    float topBevelGlow = smoothstep(bevelEdgeWidth * 0.35, 0.0, topDist);
     topBevelGlow = pow(topBevelGlow, 0.7);
-    col = mix(col, coolHighlight * 0.9, topBevelGlow * 0.12 * edgeIntensity);
+    col = mix(col, coolHighlight * 0.9, topBevelGlow * 0.08 * edgeIntensity);
     
-    // Bottom edge - warm amber/orange (secondary warm edge)
+    // Bottom edge - warm amber
     float bottomBevelGlow = smoothstep(bevelEdgeWidth * 0.8, 0.0, bottomDist);
-    bottomBevelGlow = pow(bottomBevelGlow, 0.5);
-    col = mix(col, leftBevelColor * 0.85, bottomBevelGlow * 0.55 * edgeIntensity * warmth);
-    col += leftBevelColor * pow(bottomBevelGlow, 1.5) * 0.15 * edgeIntensity * warmth;
+    bottomBevelGlow = pow(bottomBevelGlow, 0.6);
+    col = mix(col, leftBevelColor * 0.85, bottomBevelGlow * 0.3 * edgeIntensity * warmth);
     
-    // Bright edge highlight line on left (catch light - thin white line)
-    float thinEdgeWidth = u_edgeWidth * 0.25;
-    float leftThinLine = smoothstep(thinEdgeWidth, 0.0, leftDist);
-    leftThinLine = pow(leftThinLine, 0.3);
-    col = mix(col, whiteHighlight, leftThinLine * 0.5 * edgeIntensity);
-    
-    // Thin line on bottom
-    float bottomThinLine = smoothstep(thinEdgeWidth * 1.2, 0.0, bottomDist);
-    bottomThinLine = pow(bottomThinLine, 0.4);
-    col = mix(col, mix(whiteHighlight, warmOrange, 0.4), bottomThinLine * 0.35 * edgeIntensity);
+    // Bottom edge line
+    float bottomEdgeLine = smoothstep(bevelEdgeWidth * 0.12, 0.0, bottomDist);
+    bottomEdgeLine = pow(bottomEdgeLine, 0.5);
+    col += vec3(1.0, 0.9, 0.75) * bottomEdgeLine * 0.18 * edgeIntensity;
     
     // Apply noise texture overlay
     vec3 noiseTexture = getNoiseTexture(uv, u_time);
