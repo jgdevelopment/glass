@@ -1,6 +1,38 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+
+interface ShaderParams {
+  cols: number;
+  rows: number;
+  gapX: number;
+  gapY: number;
+  refractionStrength: number;
+  chromaStrength: number;
+  speed: number;
+  noiseScale: number;
+  saturation: number;
+  brightness: number;
+  glassEdgeIntensity: number;
+  causticIntensity: number;
+  vignetteStrength: number;
+}
+
+const defaultParams: ShaderParams = {
+  cols: 35,
+  rows: 9,
+  gapX: 0.012,
+  gapY: 0.008,
+  refractionStrength: 0.06,
+  chromaStrength: 0.008,
+  speed: 1.0,
+  noiseScale: 1.0,
+  saturation: 1.5,
+  brightness: 1.0,
+  glassEdgeIntensity: 1.0,
+  causticIntensity: 1.0,
+  vignetteStrength: 0.08,
+};
 
 const vertexShaderSource = `
   attribute vec2 a_position;
@@ -9,11 +41,24 @@ const vertexShaderSource = `
   }
 `;
 
-const fragmentShaderSource = `
+const createFragmentShaderSource = () => `
   precision highp float;
   
   uniform vec2 u_resolution;
   uniform float u_time;
+  uniform float u_cols;
+  uniform float u_rows;
+  uniform float u_gapX;
+  uniform float u_gapY;
+  uniform float u_refractionStrength;
+  uniform float u_chromaStrength;
+  uniform float u_speed;
+  uniform float u_noiseScale;
+  uniform float u_saturation;
+  uniform float u_brightness;
+  uniform float u_glassEdgeIntensity;
+  uniform float u_causticIntensity;
+  uniform float u_vignetteStrength;
   
   // Simplex noise functions
   vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -59,12 +104,12 @@ const fragmentShaderSource = `
   // Background color - smooth organic gradients like light through colored glass
   vec3 getBackgroundColor(vec2 uv, float time) {
     // Very slow, smooth flow
-    float slowTime = time * 0.08;
+    float slowTime = time * 0.08 * u_speed;
     
     // Large organic shapes
-    float n1 = organicNoise(uv * 0.8 + slowTime * 0.5);
-    float n2 = organicNoise(uv * 0.6 + vec2(5.2, 3.1) - slowTime * 0.3);
-    float n3 = organicNoise(uv * 1.0 + vec2(2.7, 8.3) + slowTime * 0.4);
+    float n1 = organicNoise(uv * 0.8 * u_noiseScale + slowTime * 0.5);
+    float n2 = organicNoise(uv * 0.6 * u_noiseScale + vec2(5.2, 3.1) - slowTime * 0.3);
+    float n3 = organicNoise(uv * 1.0 * u_noiseScale + vec2(2.7, 8.3) + slowTime * 0.4);
     
     // Normalize to 0-1
     float t1 = n1 * 0.5 + 0.5;
@@ -120,7 +165,10 @@ const fragmentShaderSource = `
     
     // Boost saturation
     float lum = dot(col, vec3(0.299, 0.587, 0.114));
-    col = mix(vec3(lum), col, 1.5);
+    col = mix(vec3(lum), col, u_saturation);
+    
+    // Apply brightness
+    col *= u_brightness;
     
     return col;
   }
@@ -130,8 +178,8 @@ const fragmentShaderSource = `
     float aspect = u_resolution.x / u_resolution.y;
     
     // Bar configuration
-    float cols = 35.0;
-    float rows = 9.0;
+    float cols = u_cols;
+    float rows = u_rows;
     
     float colIndex = floor(uv.x * cols);
     float rowIndex = floor(uv.y * rows);
@@ -139,17 +187,25 @@ const fragmentShaderSource = `
     float localX = fract(uv.x * cols);
     float localY = fract(uv.y * rows);
     
-    // No gaps - bars are flush, separation comes from edge highlights
-    float barX = localX;
-    float barY = localY;
+    // Bar dimensions with small gaps
+    float gapX = u_gapX;
+    float gapY = u_gapY;
+    float barMask = step(gapX, localX) * step(localX, 1.0 - gapX);
+    barMask *= step(gapY, localY) * step(localY, 1.0 - gapY);
+    
+    // Glass prism refraction - cylindrical lens effect
+    // Normalize local position within bar (excluding gaps)
+    float barX = (localX - gapX) / (1.0 - 2.0 * gapX);
+    float barY = (localY - gapY) / (1.0 - 2.0 * gapY);
+    barX = clamp(barX, 0.0, 1.0);
+    barY = clamp(barY, 0.0, 1.0);
     
     // Glass thickness simulation - parabolic refraction like a cylinder lens
     float centerDist = (barX - 0.5) * 2.0; // -1 to 1
     float glassProfile = 1.0 - centerDist * centerDist; // Parabolic thickness
     
     // Refraction offset - stronger horizontal compression/stretching
-    float refractionIndex = 1.5; // Glass IOR
-    float refractionStrength = 0.06;
+    float refractionStrength = u_refractionStrength;
     vec2 refractOffset = vec2(
       centerDist * refractionStrength * glassProfile,
       0.0
@@ -164,18 +220,19 @@ const fragmentShaderSource = `
     
     // Per-bar slight rotation/offset for organic feel
     float barSeed = colIndex * 0.73 + rowIndex * 1.37;
-    float barPhase = sin(barSeed + u_time * 0.15) * 0.008;
+    float barPhase = sin(barSeed + u_time * 0.15 * u_speed) * 0.008;
     sampleUv.y += barPhase;
-    sampleUv.x += cos(barSeed * 0.8 + u_time * 0.1) * 0.005;
+    sampleUv.x += cos(barSeed * 0.8 + u_time * 0.1 * u_speed) * 0.005;
     
     // Sample background with chromatic aberration
-    float chromaStrength = 0.008 * (1.0 + abs(centerDist));
+    float chromaStrength = u_chromaStrength * (1.0 + abs(centerDist));
     vec3 col;
     col.r = getBackgroundColor((sampleUv + vec2(chromaStrength, 0.0)) * vec2(aspect * 0.55, 1.0), u_time).r;
     col.g = getBackgroundColor(sampleUv * vec2(aspect * 0.55, 1.0), u_time).g;
     col.b = getBackgroundColor((sampleUv - vec2(chromaStrength, 0.0)) * vec2(aspect * 0.55, 1.0), u_time).b;
     
     // === GLASS EDGE EFFECTS - THICKNESS AND DEPTH ===
+    float edgeIntensity = u_glassEdgeIntensity;
     
     // Left edge - bright beveled highlight (light catching the glass edge)
     float leftEdge1 = smoothstep(0.0, 0.02, barX) * (1.0 - smoothstep(0.02, 0.05, barX));
@@ -203,34 +260,34 @@ const fragmentShaderSource = `
     col *= mix(0.7, 1.0, edgeDarken);
     
     // Fresnel-like edge brightening (light scattering in glass)
-    float fresnel = pow(1.0 - edgeDarken, 0.8) * 0.15;
+    float fresnel = pow(1.0 - edgeDarken, 0.8) * 0.15 * edgeIntensity;
     col += vec3(0.8, 0.9, 1.0) * fresnel;
     
     // Left edge highlights - primary light source
-    col += vec3(1.0, 1.0, 1.0) * leftEdge1 * 0.95;
-    col += vec3(0.9, 0.95, 1.0) * leftEdge2 * 0.4;
-    col += vec3(0.85, 0.92, 1.0) * leftGlow * 0.25;
+    col += vec3(1.0, 1.0, 1.0) * leftEdge1 * 0.95 * edgeIntensity;
+    col += vec3(0.9, 0.95, 1.0) * leftEdge2 * 0.4 * edgeIntensity;
+    col += vec3(0.85, 0.92, 1.0) * leftGlow * 0.25 * edgeIntensity;
     
     // Right edge - darker with subtle highlight
-    col *= mix(1.0, 0.85, rightDark * 0.5);
-    col += vec3(0.7, 0.8, 0.9) * rightEdge1 * 0.3;
-    col += vec3(0.6, 0.7, 0.85) * rightEdge2 * 0.15;
+    col *= mix(1.0, 0.85, rightDark * 0.5 * edgeIntensity);
+    col += vec3(0.7, 0.8, 0.9) * rightEdge1 * 0.3 * edgeIntensity;
+    col += vec3(0.6, 0.7, 0.85) * rightEdge2 * 0.15 * edgeIntensity;
     
     // Horizontal edge highlights
-    col += vec3(0.9, 0.95, 1.0) * topEdge * 0.35;
-    col += vec3(0.85, 0.9, 0.95) * bottomEdge * 0.25;
+    col += vec3(0.9, 0.95, 1.0) * topEdge * 0.35 * edgeIntensity;
+    col += vec3(0.85, 0.9, 0.95) * bottomEdge * 0.25 * edgeIntensity;
     
     // Corner accents
-    col += vec3(1.0) * cornerTL * 0.3;
-    col += vec3(0.95, 0.98, 1.0) * cornerBL * 0.2;
+    col += vec3(1.0) * cornerTL * 0.3 * edgeIntensity;
+    col += vec3(0.95, 0.98, 1.0) * cornerBL * 0.2 * edgeIntensity;
     
     // Sharp specular highlight on left edge
     float specular = pow(max(0.0, 1.0 - barX / 0.012), 8.0);
-    col += vec3(1.0) * specular * 0.7;
+    col += vec3(1.0) * specular * 0.7 * edgeIntensity;
     
     // Subtle internal reflection/caustic
-    float caustic = sin(barX * 12.0 + barY * 3.0 + u_time * 0.5) * 0.5 + 0.5;
-    caustic *= glassProfile * 0.03;
+    float caustic = sin(barX * 12.0 + barY * 3.0 + u_time * 0.5 * u_speed) * 0.5 + 0.5;
+    caustic *= glassProfile * 0.03 * u_causticIntensity;
     col += vec3(0.95, 0.98, 1.0) * caustic;
     
     // Gap between bars - dark
@@ -239,18 +296,242 @@ const fragmentShaderSource = `
     
     // Very subtle vignette
     vec2 vignetteUv = uv - 0.5;
-    float vignette = 1.0 - dot(vignetteUv, vignetteUv) * 0.08;
+    float vignette = 1.0 - dot(vignetteUv, vignetteUv) * u_vignetteStrength;
     col *= vignette;
     
     gl_FragColor = vec4(col, 1.0);
   }
 `;
 
+interface ControlPanelProps {
+  params: ShaderParams;
+  onChange: (params: ShaderParams) => void;
+  onReset: () => void;
+}
+
+function ControlPanel({ params, onChange, onReset }: ControlPanelProps) {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  const handleChange = (key: keyof ShaderParams, value: number) => {
+    onChange({ ...params, [key]: value });
+  };
+
+  const controls: {
+    key: keyof ShaderParams;
+    label: string;
+    min: number;
+    max: number;
+    step: number;
+  }[] = [
+    { key: "cols", label: "Columns", min: 1, max: 80, step: 1 },
+    { key: "rows", label: "Rows", min: 1, max: 30, step: 1 },
+    { key: "gapX", label: "Gap X", min: 0, max: 0.1, step: 0.001 },
+    { key: "gapY", label: "Gap Y", min: 0, max: 0.1, step: 0.001 },
+    { key: "refractionStrength", label: "Refraction", min: 0, max: 0.2, step: 0.005 },
+    { key: "chromaStrength", label: "Chromatic Aberration", min: 0, max: 0.05, step: 0.001 },
+    { key: "speed", label: "Animation Speed", min: 0, max: 5, step: 0.1 },
+    { key: "noiseScale", label: "Noise Scale", min: 0.1, max: 3, step: 0.1 },
+    { key: "saturation", label: "Saturation", min: 0, max: 3, step: 0.1 },
+    { key: "brightness", label: "Brightness", min: 0.1, max: 2, step: 0.05 },
+    { key: "glassEdgeIntensity", label: "Glass Edge Intensity", min: 0, max: 2, step: 0.1 },
+    { key: "causticIntensity", label: "Caustic Intensity", min: 0, max: 3, step: 0.1 },
+    { key: "vignetteStrength", label: "Vignette", min: 0, max: 0.5, step: 0.01 },
+  ];
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 16,
+        right: 16,
+        zIndex: 1000,
+        width: isCollapsed ? "auto" : 320,
+        maxHeight: "calc(100vh - 32px)",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          background: "rgba(0, 0, 0, 0.6)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderRadius: isCollapsed ? 12 : "12px 12px 0 0",
+          border: "1px solid rgba(255, 255, 255, 0.15)",
+          borderBottom: isCollapsed ? undefined : "none",
+          padding: "12px 16px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          cursor: "pointer",
+          userSelect: "none",
+        }}
+        onClick={() => setIsCollapsed(!isCollapsed)}
+      >
+        <span
+          style={{
+            color: "rgba(255, 255, 255, 0.9)",
+            fontSize: 14,
+            fontWeight: 600,
+            letterSpacing: "0.5px",
+          }}
+        >
+          ✨ Shader Controls
+        </span>
+        <span
+          style={{
+            color: "rgba(255, 255, 255, 0.6)",
+            fontSize: 18,
+            transform: isCollapsed ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 0.2s ease",
+          }}
+        >
+          ▼
+        </span>
+      </div>
+
+      {/* Controls Body */}
+      {!isCollapsed && (
+        <div
+          style={{
+            background: "rgba(0, 0, 0, 0.5)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            borderRadius: "0 0 12px 12px",
+            border: "1px solid rgba(255, 255, 255, 0.15)",
+            borderTop: "none",
+            padding: 16,
+            overflowY: "auto",
+            flex: 1,
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {controls.map(({ key, label, min, max, step }) => (
+              <div key={key}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 6,
+                  }}
+                >
+                  <label
+                    style={{
+                      color: "rgba(255, 255, 255, 0.8)",
+                      fontSize: 12,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {label}
+                  </label>
+                  <span
+                    style={{
+                      color: "rgba(255, 255, 255, 0.5)",
+                      fontSize: 11,
+                      fontFamily: "monospace",
+                      background: "rgba(255, 255, 255, 0.1)",
+                      padding: "2px 6px",
+                      borderRadius: 4,
+                    }}
+                  >
+                    {params[key].toFixed(step < 1 ? String(step).split(".")[1]?.length || 2 : 0)}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={params[key]}
+                  onChange={(e) => handleChange(key, parseFloat(e.target.value))}
+                  style={{
+                    width: "100%",
+                    height: 6,
+                    borderRadius: 3,
+                    appearance: "none",
+                    background: "rgba(255, 255, 255, 0.15)",
+                    cursor: "pointer",
+                    outline: "none",
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Reset Button */}
+          <button
+            onClick={onReset}
+            style={{
+              width: "100%",
+              marginTop: 20,
+              padding: "10px 16px",
+              background: "rgba(255, 255, 255, 0.1)",
+              border: "1px solid rgba(255, 255, 255, 0.2)",
+              borderRadius: 8,
+              color: "rgba(255, 255, 255, 0.8)",
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
+              e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.3)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
+              e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
+            }}
+          >
+            Reset to Defaults
+          </button>
+        </div>
+      )}
+
+      {/* Slider thumb styles */}
+      <style>{`
+        input[type="range"]::-webkit-slider-thumb {
+          appearance: none;
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: white;
+          cursor: pointer;
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+          transition: transform 0.1s ease;
+        }
+        input[type="range"]::-webkit-slider-thumb:hover {
+          transform: scale(1.15);
+        }
+        input[type="range"]::-moz-range-thumb {
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: white;
+          cursor: pointer;
+          border: none;
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        }
+      `}</style>
+    </div>
+  );
+}
+
 export default function GlassBarShader() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number | null>(null);
   const programRef = useRef<WebGLProgram | null>(null);
   const glRef = useRef<WebGLRenderingContext | null>(null);
+  const uniformLocationsRef = useRef<Record<string, WebGLUniformLocation | null>>({});
+  
+  const [params, setParams] = useState<ShaderParams>(defaultParams);
+
+  const handleReset = useCallback(() => {
+    setParams(defaultParams);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -277,7 +558,7 @@ export default function GlassBarShader() {
     }
 
     const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
-    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, createFragmentShaderSource());
     if (!vertexShader || !fragmentShader) return;
 
     const program = gl.createProgram();
@@ -306,8 +587,24 @@ export default function GlassBarShader() {
     gl.enableVertexAttribArray(positionLocation);
     gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
 
-    const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
-    const timeLocation = gl.getUniformLocation(program, "u_time");
+    // Store all uniform locations
+    uniformLocationsRef.current = {
+      resolution: gl.getUniformLocation(program, "u_resolution"),
+      time: gl.getUniformLocation(program, "u_time"),
+      cols: gl.getUniformLocation(program, "u_cols"),
+      rows: gl.getUniformLocation(program, "u_rows"),
+      gapX: gl.getUniformLocation(program, "u_gapX"),
+      gapY: gl.getUniformLocation(program, "u_gapY"),
+      refractionStrength: gl.getUniformLocation(program, "u_refractionStrength"),
+      chromaStrength: gl.getUniformLocation(program, "u_chromaStrength"),
+      speed: gl.getUniformLocation(program, "u_speed"),
+      noiseScale: gl.getUniformLocation(program, "u_noiseScale"),
+      saturation: gl.getUniformLocation(program, "u_saturation"),
+      brightness: gl.getUniformLocation(program, "u_brightness"),
+      glassEdgeIntensity: gl.getUniformLocation(program, "u_glassEdgeIntensity"),
+      causticIntensity: gl.getUniformLocation(program, "u_causticIntensity"),
+      vignetteStrength: gl.getUniformLocation(program, "u_vignetteStrength"),
+    };
 
     function resize() {
       if (!canvas || !gl) return;
@@ -330,9 +627,10 @@ export default function GlassBarShader() {
       if (!gl || !programRef.current) return;
 
       const time = (Date.now() - startTime) / 1000;
+      const locs = uniformLocationsRef.current;
 
-      gl.uniform2f(resolutionLocation, canvas!.width, canvas!.height);
-      gl.uniform1f(timeLocation, time);
+      gl.uniform2f(locs.resolution, canvas!.width, canvas!.height);
+      gl.uniform1f(locs.time, time);
 
       gl.drawArrays(gl.TRIANGLES, 0, 6);
 
@@ -349,16 +647,41 @@ export default function GlassBarShader() {
     };
   }, []);
 
+  // Update uniforms when params change
+  useEffect(() => {
+    const gl = glRef.current;
+    const locs = uniformLocationsRef.current;
+    if (!gl || !programRef.current) return;
+
+    gl.useProgram(programRef.current);
+    gl.uniform1f(locs.cols, params.cols);
+    gl.uniform1f(locs.rows, params.rows);
+    gl.uniform1f(locs.gapX, params.gapX);
+    gl.uniform1f(locs.gapY, params.gapY);
+    gl.uniform1f(locs.refractionStrength, params.refractionStrength);
+    gl.uniform1f(locs.chromaStrength, params.chromaStrength);
+    gl.uniform1f(locs.speed, params.speed);
+    gl.uniform1f(locs.noiseScale, params.noiseScale);
+    gl.uniform1f(locs.saturation, params.saturation);
+    gl.uniform1f(locs.brightness, params.brightness);
+    gl.uniform1f(locs.glassEdgeIntensity, params.glassEdgeIntensity);
+    gl.uniform1f(locs.causticIntensity, params.causticIntensity);
+    gl.uniform1f(locs.vignetteStrength, params.vignetteStrength);
+  }, [params]);
+
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-      }}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+        }}
+      />
+      <ControlPanel params={params} onChange={setParams} onReset={handleReset} />
+    </>
   );
 }
