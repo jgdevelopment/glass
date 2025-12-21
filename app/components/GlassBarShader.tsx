@@ -2255,7 +2255,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
                       height: 6,
                       borderRadius: 3,
                       appearance: "none",
-                      background: "rgba(255, 255, 255, 0.15)",
+                      background: `linear-gradient(to right, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.35) ${((params[key] as number - min) / (max - min)) * 100}%, rgba(255, 255, 255, 0.12) ${((params[key] as number - min) / (max - min)) * 100}%, rgba(255, 255, 255, 0.12) 100%)`,
                       cursor: "pointer",
                       outline: "none",
                     }}
@@ -2380,15 +2380,10 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
         
         /* Color picker with spring-like hover effect */
         .color-picker-wrapper {
-          transition: transform 200ms var(--spring),
-                      box-shadow 200ms var(--ease-out-expo);
+          transition: box-shadow 200ms var(--ease-out-expo);
         }
         .color-picker-wrapper:hover {
-          transform: scale(1.05);
           box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        }
-        .color-picker-wrapper:active {
-          transform: scale(0.98);
         }
 
         /* Force dark mode for react-color SketchPicker */
@@ -2470,14 +2465,9 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
           transform-origin: bottom center;
         }
         
-        /* Value badge with subtle pulse on change */
+        /* Value badge - static, not editable */
         .value-badge {
-          transition: transform 150ms var(--spring),
-                      background 150ms var(--ease-out-expo);
-        }
-        .value-badge:hover {
-          transform: scale(1.05);
-          background: rgba(255, 255, 255, 0.15);
+          /* No hover effects since not editable */
         }
         
         /* Interruptible transitions - CSS transitions are inherently interruptible */
