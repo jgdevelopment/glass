@@ -796,7 +796,6 @@ function ColorPicker({ colorR, colorG, colorB, onChange }: ColorPickerProps) {
           borderRadius: 8,
           overflow: "hidden",
           cursor: "pointer",
-          border: "1px solid rgba(255, 255, 255, 0.2)",
         }}
       >
         <div
