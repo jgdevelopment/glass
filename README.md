@@ -68,7 +68,7 @@ npm run build
 npm start
 ```
 
-## 🎨 Shader Parameters
+## Shader Parameters
 
 The Glass Bar Shader offers extensive customization through the following parameter groups:
 
@@ -151,7 +151,7 @@ design-experiments/
 └── README.md
 ```
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Feel free to:
 
@@ -171,16 +171,10 @@ Contributions are welcome! Feel free to:
 - Mobile touch controls
 - Accessibility improvements
 
-## 📄 License
+## License
 
 This project is open source and available under the [MIT License](LICENSE).
 
-## 🙏 Acknowledgments
-
-- Inspired by stained glass art and light refraction physics
-- Built with the incredible Next.js and React ecosystems
-- WebGL shader techniques from the graphics programming community
-
 ---
 
-Made with ✨ by [Jason Ginsberg](https://github.com/yourusername)
+Made by [Jason Ginsberg](https://github.com/jgdevelopment)
