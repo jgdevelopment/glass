@@ -63,6 +63,14 @@ interface ShaderParams {
   color6R: number;
   color6G: number;
   color6B: number;
+  // Color 7: Additional color
+  color7R: number;
+  color7G: number;
+  color7B: number;
+  // Color 8: Additional color
+  color8R: number;
+  color8G: number;
+  color8B: number;
   // Color balance controls
   colorContrast: number;
   colorMix: number;
@@ -124,6 +132,14 @@ const defaultParams: ShaderParams = {
   color6R: 1.0,
   color6G: 0.97,
   color6B: 0.92,
+  // Color 7: Teal/Aqua
+  color7R: 0.0,
+  color7G: 0.8,
+  color7B: 0.7,
+  // Color 8: Purple/Violet
+  color8R: 0.5,
+  color8G: 0.2,
+  color8B: 0.8,
   // Color balance
   colorContrast: 1.3,
   colorMix: 0.6,
@@ -175,6 +191,8 @@ const createFragmentShaderSource = () => `
   uniform vec3 u_color4;
   uniform vec3 u_color5;
   uniform vec3 u_color6;
+  uniform vec3 u_color7;
+  uniform vec3 u_color8;
   uniform float u_colorContrast;
   uniform float u_colorMix;
   uniform float u_paneBendVariance;
@@ -347,6 +365,8 @@ const createFragmentShaderSource = () => `
     vec3 yellow = u_color4; // Now yellow/gold
     vec3 pink = u_color5;
     vec3 highlight = u_color6;
+    vec3 teal = u_color7;
+    vec3 purple = u_color8;
     vec3 white = vec3(1.0);
     vec3 black = vec3(0.0);
     
@@ -400,6 +420,22 @@ const createFragmentShaderSource = () => `
     pinkZone *= (1.0 - hardStep(0.6, t1, edgeSoft * 0.5));
     col = mix(col, pink, pinkZone * 0.5);
     col = mix(col, mix(pink, white, 0.3), pinkZone * hardStep(0.55, t3, 0.08) * 0.4);
+    
+    // === TEAL REGIONS (between cyan and blue) ===
+    float tealZone = hardStep(0.42, t1, edgeSoft) * hardStep(0.38, t3, edgeSoft);
+    tealZone *= (1.0 - blueZone * 0.5) * (1.0 - cyanZone * 0.4);
+    tealZone *= hardStep(0.32, t5, edgeSoft);
+    col = mix(col, teal * 0.7, tealZone * 0.6);
+    col = mix(col, teal, tealZone * hardStep(0.48, t2, edgeSoft));
+    col = mix(col, mix(teal, cyan, 0.4), tealZone * hardStep(0.52, t4, 0.08) * 0.5);
+    
+    // === PURPLE/VIOLET REGIONS (scattered accent) ===
+    float purpleZone = hardStep(0.48, t3, edgeSoft) * hardStep(0.42, t1, edgeSoft);
+    purpleZone *= (1.0 - redZone * 0.5) * (1.0 - pinkZone * 0.6);
+    purpleZone *= (1.0 - hardStep(0.65, t2, edgeSoft * 0.5));
+    col = mix(col, purple * 0.6, purpleZone * 0.5);
+    col = mix(col, purple, purpleZone * hardStep(0.5, t5, edgeSoft));
+    col = mix(col, mix(purple, pink, 0.3), purpleZone * hardStep(0.58, t4, 0.08) * 0.4);
     
     // === WHITE/HIGHLIGHT REGIONS ===
     float whiteMask = hardStep(0.72, t1, 0.05) * hardStep(0.68, t2, 0.05);
@@ -751,7 +787,7 @@ function ColorPicker({ colorR, colorG, colorB, onChange }: ColorPickerProps) {
   };
   
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, width: "fit-content" }}>
       <label
         style={{
           position: "relative",
@@ -786,10 +822,13 @@ function ColorPicker({ colorR, colorG, colorB, onChange }: ColorPickerProps) {
       </label>
       <span
         style={{
-          color: "rgba(255, 255, 255, 0.6)",
+          color: "rgba(255, 255, 255, 0.5)",
           fontSize: 9,
           fontFamily: "monospace",
           textTransform: "uppercase",
+          background: "rgba(255, 255, 255, 0.1)",
+          padding: "2px 4px",
+          borderRadius: 4,
         }}
       >
         {hexValue.toUpperCase()}
@@ -811,12 +850,48 @@ function paramsEqual(a: ShaderParams, b: ShaderParams): boolean {
 }
 
 function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  // Track hydration to prevent position jank on reload
+  const [isHydrated, setIsHydrated] = useState(false);
+  const [isCollapsedState, setIsCollapsedState] = useState(false);
   const [activeSection, setActiveSection] = useState<string>("colors");
-  const [corner, setCorner] = useState<Corner>("top-right");
+  const [corner, setCornerState] = useState<Corner>("top-right");
+  
+  // Load saved corner and collapsed state on mount, then mark as hydrated
+  useEffect(() => {
+    const savedCorner = loadSavedCorner();
+    setCornerState(savedCorner);
+    setIsCollapsedState(loadSavedCollapsed());
+    
+    // Compute initial snapped position synchronously based on saved corner
+    const isRight = savedCorner.endsWith("right");
+    const x = isRight ? window.innerWidth - panelWidth - margin : margin;
+    setSnappedPosition({ x });
+    
+    // Mark hydrated after state is loaded so we render in the correct position
+    setIsHydrated(true);
+  }, []);
+  
+  // Wrapper to save corner when it changes
+  const setCorner = useCallback((newCorner: Corner) => {
+    setCornerState(newCorner);
+    saveCorner(newCorner);
+  }, []);
+  
+  // Wrapper to save collapsed state when it changes
+  const setIsCollapsed = useCallback((collapsed: boolean) => {
+    setIsCollapsedState(collapsed);
+    saveCollapsed(collapsed);
+  }, []);
+  
+  const isCollapsed = isCollapsedState;
   const [isDragging, setIsDragging] = useState(false);
+  const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [savedParams, setSavedParams] = useState<ShaderParams>(defaultParams);
+  const [snappedPosition, setSnappedPosition] = useState<{ x: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const wasDraggingRef = useRef(false);
+  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const isTop = corner.startsWith("top");
   const isRight = corner.endsWith("right");
@@ -837,8 +912,25 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    // Only allow dragging when collapsed
+    if (!isCollapsed) return;
     if ((e.target as HTMLElement).tagName === "BUTTON" || 
         (e.target as HTMLElement).tagName === "INPUT") return;
+    
+    const panel = panelRef.current;
+    if (!panel) return;
+    
+    // Store initial mouse position to detect intentional drag vs click
+    mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
+    wasDraggingRef.current = false;
+    
+    const rect = panel.getBoundingClientRect();
+    // Calculate offset from mouse position to panel's top-left corner
+    setDragOffset({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    });
+    setDragPosition({ x: rect.left, y: rect.top });
     setIsDragging(true);
   };
 
@@ -846,21 +938,62 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
     if (!isDragging) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const windowWidth = window.innerWidth;
-      const windowHeight = window.innerHeight;
-      const centerX = windowWidth / 2;
-      const centerY = windowHeight / 2;
-
-      const newIsRight = e.clientX > centerX;
-      const newIsTop = e.clientY < centerY;
-
-      const newCorner: Corner = `${newIsTop ? "top" : "bottom"}-${newIsRight ? "right" : "left"}`;
-      if (newCorner !== corner) {
-        setCorner(newCorner);
+      const panel = panelRef.current;
+      if (!panel) return;
+      
+      // Only consider it a drag if moved more than 5 pixels from initial position
+      const startPos = mouseDownPosRef.current;
+      if (startPos) {
+        const dx = Math.abs(e.clientX - startPos.x);
+        const dy = Math.abs(e.clientY - startPos.y);
+        if (dx < 5 && dy < 5) {
+          // Not enough movement to be considered a drag
+          return;
+        }
       }
+      
+      const panelWidth = 320;
+      const panelHeight = panel.getBoundingClientRect().height;
+      
+      // Calculate new position based on mouse and offset
+      let newX = e.clientX - dragOffset.x;
+      let newY = e.clientY - dragOffset.y;
+      
+      // Constrain to viewport
+      const maxX = window.innerWidth - panelWidth;
+      const maxY = window.innerHeight - panelHeight;
+      newX = Math.max(0, Math.min(newX, maxX));
+      newY = Math.max(0, Math.min(newY, maxY));
+      
+      // Mark that actual dragging occurred (movement happened)
+      wasDraggingRef.current = true;
+      
+      setDragPosition({ x: newX, y: newY });
     };
 
     const handleMouseUp = () => {
+      // Only snap to corner if actual dragging occurred
+      if (wasDraggingRef.current) {
+        // Determine which corner to snap to based on final position
+        const windowWidth = window.innerWidth;
+        const windowHeight = window.innerHeight;
+        
+        const panel = panelRef.current;
+        if (panel && dragPosition) {
+          const rect = panel.getBoundingClientRect();
+          const panelCenterX = rect.left + rect.width / 2;
+          const panelCenterY = rect.top + rect.height / 2;
+          
+          const newIsRight = panelCenterX > windowWidth / 2;
+          const newIsTop = panelCenterY < windowHeight / 2;
+          
+          const newCorner: Corner = `${newIsTop ? "top" : "bottom"}-${newIsRight ? "right" : "left"}`;
+          setCorner(newCorner);
+        }
+      }
+      
+      mouseDownPosRef.current = null;
+      setDragPosition(null);
       setIsDragging(false);
     };
 
@@ -871,7 +1004,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [isDragging, corner]);
+  }, [isDragging, dragOffset, dragPosition, setCorner]);
 
   const handleChange = (key: keyof ShaderParams, value: number) => {
     onChange({ ...params, [key]: value });
@@ -893,6 +1026,8 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
     { prefix: "color4" },
     { prefix: "color5" },
     { prefix: "color6" },
+    { prefix: "color7" },
+    { prefix: "color8" },
   ];
 
   const controls: {
@@ -960,6 +1095,50 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
     return "12px 12px 0 0";
   };
 
+  // Calculate corner positions
+  const margin = 16;
+  const panelWidth = 320;
+  
+  const getCornerPosition = useCallback(() => {
+    if (typeof window === "undefined") return { x: margin };
+    
+    const x = isRight ? window.innerWidth - panelWidth - margin : margin;
+    
+    return { x };
+  }, [isRight]);
+  
+  // Update snapped position when corner changes or on resize
+  useEffect(() => {
+    if (!isDragging) {
+      const updatePosition = () => {
+        setSnappedPosition(getCornerPosition());
+      };
+      
+      updatePosition();
+      window.addEventListener("resize", updatePosition);
+      
+      return () => {
+        window.removeEventListener("resize", updatePosition);
+      };
+    }
+  }, [isDragging, corner, getCornerPosition]);
+
+  // Get current position - drag position or snapped position
+  // When dragging, use absolute top/left. When snapped, use corner-based positioning.
+  const currentX = isDragging && dragPosition ? dragPosition.x : snappedPosition?.x ?? margin;
+  const currentY = isDragging && dragPosition ? dragPosition.y : null;
+
+  const handleToggleClick = useCallback((e: React.MouseEvent) => {
+    // Prevent toggle if we were just dragging
+    if (wasDraggingRef.current) {
+      wasDraggingRef.current = false;
+      return;
+    }
+    // Prevent event from bubbling to avoid double-triggers
+    e.stopPropagation();
+    setIsCollapsed(!isCollapsed);
+  }, [isCollapsed, setIsCollapsed]);
+
   const headerElement = (
     <div
       style={{
@@ -975,9 +1154,10 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
         justifyContent: "space-between",
         alignItems: "center",
         userSelect: "none",
-        cursor: isDragging ? "grabbing" : "grab",
+        cursor: isCollapsed ? (isDragging ? "grabbing" : "grab") : "pointer",
       }}
       onMouseDown={handleMouseDown}
+      onClick={handleToggleClick}
     >
       <div
         style={{
@@ -986,7 +1166,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
           gap: 8,
           cursor: "pointer",
         }}
-        onClick={() => setIsCollapsed(!isCollapsed)}
+        onClick={handleToggleClick}
       >
         <span
           style={{
@@ -997,29 +1177,32 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
         >
           Shader Controls
         </span>
-        <ChevronDown
-          size={16}
-          color="rgba(255, 255, 255, 0.6)"
-          style={{
-            transform: isCollapsed 
-              ? (isTop ? "rotate(180deg)" : "rotate(0deg)")
-              : (isTop ? "rotate(0deg)" : "rotate(180deg)"),
-          }}
-        />
+        <span
+          className="chevron-icon"
+          data-collapsed={isCollapsed}
+          data-top={isTop}
+          data-dragging={isDragging}
+        >
+          <ChevronDown
+            size={16}
+            color="rgba(255, 255, 255, 0.6)"
+          />
+        </span>
       </div>
       {hasChanges && (
         <div style={{ display: "flex", gap: 12 }}>
-          <button
+            <button
             onClick={(e) => {
               e.stopPropagation();
               handleSave();
             }}
+            onMouseDown={(e) => e.stopPropagation()}
             style={{
               background: "transparent",
               border: "none",
               color: "rgba(255, 255, 255, 0.7)",
               fontSize: 12,
-              fontWeight: 500,
+              fontWeight: 600,
               cursor: "pointer",
               padding: 0,
             }}
@@ -1037,12 +1220,13 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
               e.stopPropagation();
               onReset();
             }}
+            onMouseDown={(e) => e.stopPropagation()}
             style={{
               background: "transparent",
               border: "none",
               color: "rgba(255, 255, 255, 0.7)",
               fontSize: 12,
-              fontWeight: 500,
+              fontWeight: 600,
               cursor: "pointer",
               padding: 0,
             }}
@@ -1060,22 +1244,57 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
     </div>
   );
 
+  // Build positioning styles based on corner and drag state
+  const getPositionStyles = (): React.CSSProperties => {
+    const base: React.CSSProperties = {
+      position: "fixed",
+      left: currentX,
+      zIndex: 1000,
+      width: panelWidth,
+      maxHeight: `calc(100vh - ${margin * 2}px)`,
+      overflow: "hidden",
+      display: "flex",
+      flexDirection: "column",
+    };
+    
+    if (isDragging && currentY !== null) {
+      // When dragging, use absolute top positioning
+      return {
+        ...base,
+        top: currentY,
+        bottom: "auto",
+        transition: "none",
+      };
+    }
+    
+    // When snapped to corner, use top or bottom based on corner
+    if (isTop) {
+      return {
+        ...base,
+        top: margin,
+        bottom: "auto",
+        transition: "left 0.2s ease-out",
+      };
+    } else {
+      // Bottom corners: anchor to bottom so height grows upward
+      return {
+        ...base,
+        top: "auto",
+        bottom: margin,
+        transition: "left 0.2s ease-out",
+      };
+    }
+  };
+
+  // Don't render until hydrated to prevent position jank
+  if (!isHydrated) {
+    return null;
+  }
+
   return (
     <div
       ref={panelRef}
-      style={{
-        position: "fixed",
-        top: isTop ? 16 : undefined,
-        bottom: !isTop ? 16 : undefined,
-        right: isRight ? 16 : undefined,
-        left: !isRight ? 16 : undefined,
-        zIndex: 1000,
-        width: 320,
-        maxHeight: "calc(100vh - 32px)",
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-      }}
+      style={getPositionStyles()}
     >
       {/* Header - render first if top corners */}
       {isTop && headerElement}
@@ -1095,6 +1314,8 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
             overflowY: "auto",
             flex: 1,
             order: isTop ? 1 : 0,
+            // Smooth appearance animation - direction depends on panel position
+            animation: isTop ? "fadeInDown 0.15s ease-out" : "fadeInUp 0.15s ease-out",
           }}
         >
           {/* Section Tabs */}
@@ -1137,9 +1358,14 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gap: 12,
+                  gridTemplateColumns: "repeat(4, auto)",
+                  columnGap: 24,
+                  rowGap: 12,
                   marginBottom: 8,
+                  marginLeft: -16,
+                  marginRight: -16,
+                  paddingLeft: 16,
+                  paddingRight: 16,
                 }}
               >
                 {colorControls.map(({ prefix }) => (
@@ -1216,8 +1442,44 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
       {/* Header - render last if bottom corners */}
       {!isTop && headerElement}
 
-      {/* Slider thumb styles */}
+      {/* Slider thumb styles and animations */}
       <style>{`
+        .chevron-icon {
+          display: inline-flex;
+          transition: transform 0.2s ease-out, opacity 0.15s ease-out;
+        }
+        .chevron-icon[data-collapsed="true"] {
+          transform: rotate(-90deg);
+        }
+        .chevron-icon[data-collapsed="false"][data-top="true"] {
+          transform: rotate(0deg);
+        }
+        .chevron-icon[data-collapsed="false"][data-top="false"] {
+          transform: rotate(180deg);
+        }
+        .chevron-icon[data-dragging="true"] {
+          opacity: 0;
+        }
+        @keyframes fadeInDown {
+          from {
+            opacity: 0;
+            transform: translateY(-8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes fadeInUp {
+          from {
+            opacity: 0;
+            transform: translateY(8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
         input[type="range"]::-webkit-slider-thumb {
           appearance: none;
           width: 14px;
@@ -1246,6 +1508,8 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
 }
 
 const STORAGE_KEY = "glassBarShaderParams";
+const CORNER_STORAGE_KEY = "glassBarShaderCorner";
+const COLLAPSED_STORAGE_KEY = "glassBarShaderCollapsed";
 
 function loadSavedParams(): ShaderParams {
   if (typeof window === "undefined") return defaultParams;
@@ -1259,6 +1523,50 @@ function loadSavedParams(): ShaderParams {
     // ignore parse errors
   }
   return defaultParams;
+}
+
+function loadSavedCorner(): Corner {
+  if (typeof window === "undefined") return "top-right";
+  try {
+    const saved = localStorage.getItem(CORNER_STORAGE_KEY);
+    if (saved && ["top-right", "top-left", "bottom-right", "bottom-left"].includes(saved)) {
+      return saved as Corner;
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return "top-right";
+}
+
+function saveCorner(corner: Corner): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(CORNER_STORAGE_KEY, corner);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function loadSavedCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const saved = localStorage.getItem(COLLAPSED_STORAGE_KEY);
+    if (saved !== null) {
+      return saved === "true";
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return false;
+}
+
+function saveCollapsed(collapsed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(COLLAPSED_STORAGE_KEY, String(collapsed));
+  } catch {
+    // ignore storage errors
+  }
 }
 
 export default function GlassBarShader() {
@@ -1371,6 +1679,8 @@ export default function GlassBarShader() {
       color4: gl.getUniformLocation(program, "u_color4"),
       color5: gl.getUniformLocation(program, "u_color5"),
       color6: gl.getUniformLocation(program, "u_color6"),
+      color7: gl.getUniformLocation(program, "u_color7"),
+      color8: gl.getUniformLocation(program, "u_color8"),
       colorContrast: gl.getUniformLocation(program, "u_colorContrast"),
       colorMix: gl.getUniformLocation(program, "u_colorMix"),
       paneBendVariance: gl.getUniformLocation(program, "u_paneBendVariance"),
@@ -1456,6 +1766,8 @@ export default function GlassBarShader() {
     gl.uniform3f(locs.color4, params.color4R, params.color4G, params.color4B);
     gl.uniform3f(locs.color5, params.color5R, params.color5G, params.color5B);
     gl.uniform3f(locs.color6, params.color6R, params.color6G, params.color6B);
+    gl.uniform3f(locs.color7, params.color7R, params.color7G, params.color7B);
+    gl.uniform3f(locs.color8, params.color8R, params.color8G, params.color8B);
     gl.uniform1f(locs.colorContrast, params.colorContrast);
     gl.uniform1f(locs.colorMix, params.colorMix);
     gl.uniform1f(locs.paneBendVariance, params.paneBendVariance);
