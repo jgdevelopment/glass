@@ -10,6 +10,7 @@ import {
   PanelTop,
   ChevronDown,
 } from "lucide-react";
+import { SketchPicker, ColorResult } from "react-color";
 
 interface ShaderParams {
   cols: number;
@@ -778,17 +779,135 @@ interface ColorPickerProps {
   onChange: (r: number, g: number, b: number) => void;
 }
 
+interface PopoverPosition {
+  vertical: "top" | "bottom";
+  horizontal: "left" | "right";
+}
+
 function ColorPicker({ colorR, colorG, colorB, onChange }: ColorPickerProps) {
-  const hexValue = rgbToHex(colorR, colorG, colorB);
+  const [isOpen, setIsOpen] = useState(false);
+  const [position, setPosition] = useState<PopoverPosition>({ vertical: "bottom", horizontal: "left" });
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const swatchRef = useRef<HTMLDivElement>(null);
   
-  const handleColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const rgb = hexToRgb(e.target.value);
-    onChange(rgb.r, rgb.g, rgb.b);
+  // Approximate dimensions of the SketchPicker
+  const PICKER_WIDTH = 220;
+  const PICKER_HEIGHT = 300;
+  const MARGIN = 8;
+  
+  const hexValue = rgbToHex(colorR, colorG, colorB);
+  const rgbColor = {
+    r: Math.round(colorR * 255),
+    g: Math.round(colorG * 255),
+    b: Math.round(colorB * 255),
+  };
+  
+  const handleColorChange = (color: ColorResult) => {
+    onChange(color.rgb.r / 255, color.rgb.g / 255, color.rgb.b / 255);
+  };
+  
+  // Calculate optimal position when opening
+  const calculatePosition = useCallback(() => {
+    if (!swatchRef.current) return;
+    
+    const rect = swatchRef.current.getBoundingClientRect();
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+    
+    // Check vertical space
+    const spaceBelow = windowHeight - rect.bottom - MARGIN;
+    const spaceAbove = rect.top - MARGIN;
+    const vertical: "top" | "bottom" = spaceBelow >= PICKER_HEIGHT ? "bottom" : 
+                                        spaceAbove >= PICKER_HEIGHT ? "top" : 
+                                        spaceBelow >= spaceAbove ? "bottom" : "top";
+    
+    // Check horizontal space
+    const spaceRight = windowWidth - rect.left;
+    const spaceLeft = rect.right;
+    const horizontal: "left" | "right" = spaceRight >= PICKER_WIDTH ? "left" :
+                                          spaceLeft >= PICKER_WIDTH ? "right" : 
+                                          spaceRight >= spaceLeft ? "left" : "right";
+    
+    setPosition({ vertical, horizontal });
+  }, []);
+  
+  // Handle opening the picker
+  const handleOpen = useCallback(() => {
+    if (!isOpen) {
+      calculatePosition();
+    }
+    setIsOpen(!isOpen);
+  }, [isOpen, calculatePosition]);
+  
+  // Close popover when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node) &&
+        swatchRef.current &&
+        !swatchRef.current.contains(e.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    };
+    
+    if (isOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isOpen]);
+  
+  // Recalculate position on window resize while open
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    const handleResize = () => calculatePosition();
+    window.addEventListener("resize", handleResize);
+    
+    return () => window.removeEventListener("resize", handleResize);
+  }, [isOpen, calculatePosition]);
+  
+  // Get dynamic styles based on calculated position
+  const getPopoverStyles = (): React.CSSProperties => {
+    const baseStyles: React.CSSProperties = {
+      position: "absolute",
+      zIndex: 1001,
+    };
+    
+    // Vertical positioning
+    if (position.vertical === "bottom") {
+      baseStyles.top = "100%";
+      baseStyles.marginTop = MARGIN;
+    } else {
+      baseStyles.bottom = "100%";
+      baseStyles.marginBottom = MARGIN;
+    }
+    
+    // Horizontal positioning
+    if (position.horizontal === "left") {
+      baseStyles.left = 0;
+    } else {
+      baseStyles.right = 0;
+    }
+    
+    // Animation based on direction
+    const animationName = position.vertical === "bottom" ? "fadeInDown" : "fadeInUp";
+    baseStyles.animation = `${animationName} 150ms cubic-bezier(0.16, 1, 0.3, 1)`;
+    
+    return baseStyles;
   };
   
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, width: "fit-content" }}>
-      <label
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, width: "fit-content", position: "relative" }}>
+      {/* Emil Kowalski: Spring-like hover effect for interactive elements */}
+      <div
+        ref={swatchRef}
+        className="color-picker-wrapper"
+        onClick={handleOpen}
         style={{
           position: "relative",
           width: 44,
@@ -796,30 +915,12 @@ function ColorPicker({ colorR, colorG, colorB, onChange }: ColorPickerProps) {
           borderRadius: 8,
           overflow: "hidden",
           cursor: "pointer",
+          background: hexValue,
+          boxShadow: isOpen ? "0 0 0 2px rgba(255, 255, 255, 0.5)" : "none",
         }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background: hexValue,
-          }}
-        />
-        <input
-          type="color"
-          value={hexValue}
-          onChange={handleColorChange}
-          style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            opacity: 0,
-            cursor: "pointer",
-          }}
-        />
-      </label>
+      />
       <span
+        className="value-badge"
         style={{
           color: "rgba(255, 255, 255, 0.5)",
           fontSize: 9,
@@ -832,6 +933,27 @@ function ColorPicker({ colorR, colorG, colorB, onChange }: ColorPickerProps) {
       >
         {hexValue.toUpperCase()}
       </span>
+      
+      {/* Sketch Color Picker Popover with edge detection */}
+      {isOpen && (
+        <div
+          ref={popoverRef}
+          style={getPopoverStyles()}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <SketchPicker
+            color={rgbColor}
+            onChange={handleColorChange}
+            disableAlpha={true}
+            presetColors={[
+              "#5BC4E8", "#1B3BA8", "#E84420", "#F5A623",
+              "#C850A0", "#00CCC0", "#8B5CF6", "#FFFFFF",
+              "#000000", "#FF6B6B", "#4ECDC4", "#45B7D1",
+            ]}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -1140,6 +1262,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
 
   const headerElement = (
     <div
+      className="panel-header"
       style={{
         background: "rgba(0, 0, 0, 0.6)",
         backdropFilter: "blur(20px)",
@@ -1191,6 +1314,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
       {hasChanges && (
         <div style={{ display: "flex", gap: 12 }}>
             <button
+            className="header-button"
             onClick={(e) => {
               e.stopPropagation();
               handleSave();
@@ -1215,6 +1339,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
             Save
           </button>
           <button
+            className="header-button"
             onClick={(e) => {
               e.stopPropagation();
               onReset();
@@ -1267,12 +1392,13 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
     }
     
     // When snapped to corner, use top or bottom based on corner
+    // Emil Kowalski: Custom easing (ease-out-expo) for snappy feel
     if (isTop) {
       return {
         ...base,
         top: margin,
         bottom: "auto",
-        transition: "left 0.2s ease-out",
+        transition: "left 200ms cubic-bezier(0.16, 1, 0.3, 1)",
       };
     } else {
       // Bottom corners: anchor to bottom so height grows upward
@@ -1280,7 +1406,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
         ...base,
         top: "auto",
         bottom: margin,
-        transition: "left 0.2s ease-out",
+        transition: "left 200ms cubic-bezier(0.16, 1, 0.3, 1)",
       };
     }
   };
@@ -1301,6 +1427,8 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
       {/* Controls Body */}
       {!isCollapsed && (
         <div
+          className="controls-body"
+          data-position={isTop ? "top" : "bottom"}
           style={{
             background: "rgba(0, 0, 0, 0.5)",
             backdropFilter: "blur(20px)",
@@ -1313,11 +1441,14 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
             overflowY: "auto",
             flex: 1,
             order: isTop ? 1 : 0,
-            // Smooth appearance animation - direction depends on panel position
-            animation: isTop ? "fadeInDown 0.15s ease-out" : "fadeInUp 0.15s ease-out",
+            // Emil Kowalski: Origin-aware animation with blur for smoother transitions
+            // Using custom easing (--ease-out-expo) for snappy feel
+            animation: isTop 
+              ? "fadeInDown 180ms cubic-bezier(0.16, 1, 0.3, 1)" 
+              : "fadeInUp 180ms cubic-bezier(0.16, 1, 0.3, 1)",
           }}
         >
-          {/* Section Tabs */}
+          {/* Section Tabs - Emil Kowalski's subtle scale on press */}
           <div
             style={{
               display: "flex",
@@ -1329,6 +1460,8 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
             {sections.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
+                className="section-tab"
+                data-active={activeSection === id}
                 onClick={() => setActiveSection(id)}
                 style={{
                   padding: "6px 10px",
@@ -1339,7 +1472,6 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
                   borderRadius: 6,
                   color: activeSection === id ? "rgba(255, 255, 255, 0.95)" : "rgba(255, 255, 255, 0.6)",
                   cursor: "pointer",
-                  transition: "all 0.15s ease",
                   display: "flex",
                   alignItems: "center",
                   gap: 5,
@@ -1379,7 +1511,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
               </div>
             )}
             
-            {/* Slider Controls */}
+            {/* Slider Controls - Emil Kowalski: Spring-like slider interactions */}
             {controls
               .filter(({ section }) => section === activeSection)
               .map(({ key, label, min, max, step }) => (
@@ -1402,6 +1534,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
                       {label}
                     </label>
                     <span
+                      className="value-badge"
                       style={{
                         color: "rgba(255, 255, 255, 0.5)",
                         fontSize: 11,
@@ -1441,11 +1574,29 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
       {/* Header - render last if bottom corners */}
       {!isTop && headerElement}
 
-      {/* Slider thumb styles and animations */}
+      {/* Emil Kowalski's Animation Principles Applied */}
       <style>{`
+        /* Custom easing curves - Emil recommends stronger curves than CSS defaults */
+        :root {
+          --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+          --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+          --ease-in-out-quint: cubic-bezier(0.83, 0, 0.17, 1);
+          --spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        
+        /* Reduced motion support - accessibility first */
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+          }
+        }
+        
+        /* Chevron icon with custom easing */
         .chevron-icon {
           display: inline-flex;
-          transition: transform 0.2s ease-out, opacity 0.15s ease-out;
+          transition: transform 200ms var(--ease-out-expo), opacity 150ms var(--ease-out-expo);
         }
         .chevron-icon[data-collapsed="true"] {
           transform: rotate(-90deg);
@@ -1459,25 +1610,93 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
         .chevron-icon[data-dragging="true"] {
           opacity: 0;
         }
+        
+        /* Panel enter animations with origin-aware transform + blur for smoother transitions */
         @keyframes fadeInDown {
           from {
             opacity: 0;
-            transform: translateY(-8px);
+            transform: translateY(-8px) scale(0.96);
+            filter: blur(4px);
           }
           to {
             opacity: 1;
-            transform: translateY(0);
+            transform: translateY(0) scale(1);
+            filter: blur(0);
           }
         }
         @keyframes fadeInUp {
           from {
             opacity: 0;
-            transform: translateY(8px);
+            transform: translateY(8px) scale(0.96);
+            filter: blur(4px);
           }
           to {
             opacity: 1;
-            transform: translateY(0);
+            transform: translateY(0) scale(1);
+            filter: blur(0);
           }
+        }
+        
+        /* Button styles with Emil's scale-on-press principle (0.97 scale) */
+        .control-button {
+          transition: transform 120ms var(--ease-out-expo), 
+                      background 150ms var(--ease-out-expo),
+                      border-color 150ms var(--ease-out-expo),
+                      color 150ms var(--ease-out-expo),
+                      box-shadow 150ms var(--ease-out-expo);
+          will-change: transform;
+        }
+        .control-button:hover {
+          transform: translateY(-1px);
+        }
+        .control-button:active {
+          transform: scale(0.97) translateY(0);
+        }
+        
+        /* Section tab buttons with subtle scale and blur on state change */
+        .section-tab {
+          transition: transform 150ms var(--ease-out-expo),
+                      background 200ms var(--ease-out-expo),
+                      border-color 200ms var(--ease-out-expo),
+                      color 180ms var(--ease-out-expo),
+                      box-shadow 200ms var(--ease-out-expo);
+          will-change: transform, background;
+        }
+        .section-tab:hover {
+          transform: translateY(-1px);
+        }
+        .section-tab:active {
+          transform: scale(0.97);
+        }
+        .section-tab[data-active="true"] {
+          box-shadow: 0 2px 8px rgba(255, 255, 255, 0.1);
+        }
+        
+        /* Header button with press effect */
+        .header-button {
+          transition: transform 100ms var(--ease-out-expo),
+                      color 150ms var(--ease-out-expo);
+        }
+        .header-button:active {
+          transform: scale(0.95);
+        }
+        
+        /* Color picker with spring-like hover effect */
+        .color-picker-wrapper {
+          transition: transform 200ms var(--spring),
+                      box-shadow 200ms var(--ease-out-expo);
+        }
+        .color-picker-wrapper:hover {
+          transform: scale(1.05);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        .color-picker-wrapper:active {
+          transform: scale(0.98);
+        }
+        
+        /* Slider thumb with enhanced interactions */
+        input[type="range"] {
+          transition: opacity 150ms var(--ease-out-expo);
         }
         input[type="range"]::-webkit-slider-thumb {
           appearance: none;
@@ -1487,10 +1706,17 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
           background: white;
           cursor: pointer;
           box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-          transition: transform 0.1s ease;
+          transition: transform 150ms var(--spring),
+                      box-shadow 150ms var(--ease-out-expo);
+          will-change: transform;
         }
         input[type="range"]::-webkit-slider-thumb:hover {
+          transform: scale(1.2);
+          box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+        }
+        input[type="range"]::-webkit-slider-thumb:active {
           transform: scale(1.15);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
         }
         input[type="range"]::-moz-range-thumb {
           width: 14px;
@@ -1500,7 +1726,48 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
           cursor: pointer;
           border: none;
           box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+          transition: transform 150ms var(--spring);
         }
+        input[type="range"]::-moz-range-thumb:hover {
+          transform: scale(1.2);
+        }
+        input[type="range"]::-moz-range-thumb:active {
+          transform: scale(1.15);
+        }
+        
+        /* Slider track hover effect */
+        input[type="range"]:hover {
+          opacity: 1;
+        }
+        
+        /* Panel header with subtle hover effect */
+        .panel-header {
+          transition: background 200ms var(--ease-out-expo);
+        }
+        .panel-header:hover {
+          background: rgba(0, 0, 0, 0.65);
+        }
+        
+        /* Controls body smooth entrance */
+        .controls-body {
+          transform-origin: top center;
+        }
+        .controls-body[data-position="bottom"] {
+          transform-origin: bottom center;
+        }
+        
+        /* Value badge with subtle pulse on change */
+        .value-badge {
+          transition: transform 150ms var(--spring),
+                      background 150ms var(--ease-out-expo);
+        }
+        .value-badge:hover {
+          transform: scale(1.05);
+          background: rgba(255, 255, 255, 0.15);
+        }
+        
+        /* Interruptible transitions - CSS transitions are inherently interruptible */
+        /* This allows users to change state mid-animation smoothly */
       `}</style>
     </div>
   );
