@@ -125,7 +125,7 @@ The Glass Bar Shader offers extensive customization through the following parame
 | `paneColorShift` | Color variation between panes | 0.85 |
 | `paneDistortVariance` | Distortion variance | 0.55 |
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 - **[Next.js 16](https://nextjs.org/)** - React framework with App Router
 - **[React 19](https://react.dev/)** - UI library
@@ -135,7 +135,7 @@ The Glass Bar Shader offers extensive customization through the following parame
 - **[Lucide React](https://lucide.dev/)** - Beautiful icons
 - **[React Color](https://casesandberg.github.io/react-color/)** - Color picker components
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 design-experiments/
