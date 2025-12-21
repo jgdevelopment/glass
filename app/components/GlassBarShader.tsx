@@ -15,8 +15,6 @@ import { SketchPicker, ColorResult } from "react-color";
 interface ShaderParams {
   cols: number;
   rows: number;
-  gapX: number;
-  gapY: number;
   refractionStrength: number;
   chromaStrength: number;
   speed: number;
@@ -87,8 +85,6 @@ const defaultParams: ShaderParams = {
   // Grid - 28 columns, 6 rows to match reference grid pattern exactly
   cols: 28,
   rows: 6,
-  gapX: 0.004,
-  gapY: 0.006,
   // Glass refraction effects - enhanced for internal bending
   refractionStrength: 0.15,
   chromaStrength: 0.030,
@@ -170,8 +166,6 @@ const createFragmentShaderSource = () => `
   uniform float u_time;
   uniform float u_cols;
   uniform float u_rows;
-  uniform float u_gapX;
-  uniform float u_gapY;
   uniform float u_refractionStrength;
   uniform float u_chromaStrength;
   uniform float u_speed;
@@ -1023,54 +1017,57 @@ const createFragmentShaderSource = () => `
       // sqrt(2)/2 for proper 45-degree distance calculation
       float sqrt2inv = 0.7071;
       
+      // Scale factor for edge distances to match rectangle edge effect visibility
+      float edgeScale = 0.85;
+      
       // The triangles are formed by dividing rectangles with diagonals
-      // For / diagonal (tIsOdd > 0.5): lower triangle below y=x, upper above
-      // For \ diagonal (tIsOdd <= 0.5): lower triangle below y=1-x, upper above
+      // For "/" diagonal (tIsOdd > 0.5): upper-left triangle (y>x), lower-right triangle (y<x)
+      // For "\" diagonal (tIsOdd <= 0.5): upper-right triangle (x+y>1), lower-left triangle (x+y<1)
       
       if (tIsOdd > 0.5) {
         // "/" diagonal pattern - line is y = x
         if (tInUpper > 0.5) {
-          // Upper triangle: bounded by top (y=1), right (x=1), and diagonal (y=x)
-          topDist = (1.0 - tLocalY) * 0.9;
-          rightDist = (1.0 - tLocalX) * 0.9;
-          // Distance to diagonal y=x: |x-y|/sqrt(2), but we're above so y>x
-          diagLeftDist = (tLocalY - tLocalX) * sqrt2inv * 0.9;
-          diagRightDist = 1.0; // Not used for this triangle
-          leftDist = diagLeftDist;
-          bottomDist = 1.0;
-          triUpward = 0.0; // Upper triangles point down in this pattern
+          // Upper-left triangle: vertices (0,0), (0,1), (1,1)
+          // Edges: top (y=1), left (x=0), diagonal (y=x on right side)
+          topDist = (1.0 - tLocalY) * edgeScale;
+          leftDist = tLocalX * edgeScale;
+          // Distance to diagonal y=x: we're above (y>x), normal points toward lower-right
+          diagRightDist = (tLocalY - tLocalX) * sqrt2inv * edgeScale;
+          rightDist = diagRightDist; // Diagonal acts as "right" edge
+          bottomDist = 1.0; // No bottom edge
+          triUpward = 0.0; // This triangle points downward (apex at bottom-right area)
         } else {
-          // Lower triangle: bounded by bottom (y=0), left (x=0), and diagonal (y=x)
-          bottomDist = tLocalY * 0.9;
-          leftDist = tLocalX * 0.9;
-          // Distance to diagonal: we're below so x>y
-          diagRightDist = (tLocalX - tLocalY) * sqrt2inv * 0.9;
-          diagLeftDist = 1.0;
-          rightDist = diagRightDist;
-          topDist = 1.0;
-          triUpward = 1.0; // Lower triangles point up in this pattern
+          // Lower-right triangle: vertices (0,0), (1,0), (1,1)
+          // Edges: bottom (y=0), right (x=1), diagonal (y=x on left side)
+          bottomDist = tLocalY * edgeScale;
+          rightDist = (1.0 - tLocalX) * edgeScale;
+          // Distance to diagonal: we're below (y<x), normal points toward upper-left
+          diagLeftDist = (tLocalX - tLocalY) * sqrt2inv * edgeScale;
+          leftDist = diagLeftDist; // Diagonal acts as "left" edge
+          topDist = 1.0; // No top edge
+          triUpward = 1.0; // This triangle points upward (apex at top-left area)
         }
       } else {
-        // "\" diagonal pattern - line is y = 1-x (or x+y=1)
+        // "\" diagonal pattern - line is x + y = 1
         if (tInUpper > 0.5) {
-          // Upper triangle: bounded by top (y=1), left (x=0), and diagonal (x+y=1)
-          topDist = (1.0 - tLocalY) * 0.9;
-          leftDist = tLocalX * 0.9;
-          // Distance to diagonal x+y=1: |x+y-1|/sqrt(2), we're above so x+y>1
-          diagRightDist = (tLocalX + tLocalY - 1.0) * sqrt2inv * 0.9;
-          diagLeftDist = 1.0;
-          rightDist = diagRightDist;
-          bottomDist = 1.0;
+          // Upper-right triangle: vertices (0,1), (1,0), (1,1)
+          // Edges: top (y=1), right (x=1), diagonal (x+y=1 on left/bottom side)
+          topDist = (1.0 - tLocalY) * edgeScale;
+          rightDist = (1.0 - tLocalX) * edgeScale;
+          // Distance to diagonal x+y=1: we're above (x+y>1), normal points toward lower-left
+          diagLeftDist = (tLocalX + tLocalY - 1.0) * sqrt2inv * edgeScale;
+          leftDist = diagLeftDist; // Diagonal acts as "left" edge
+          bottomDist = 1.0; // No bottom edge
           triUpward = 0.0;
         } else {
-          // Lower triangle: bounded by bottom (y=0), right (x=1), and diagonal (x+y=1)
-          bottomDist = tLocalY * 0.9;
-          rightDist = (1.0 - tLocalX) * 0.9;
-          // Distance to diagonal: we're below so x+y<1
-          diagLeftDist = (1.0 - tLocalX - tLocalY) * sqrt2inv * 0.9;
-          diagRightDist = 1.0;
-          leftDist = diagLeftDist;
-          topDist = 1.0;
+          // Lower-left triangle: vertices (0,0), (0,1), (1,0)
+          // Edges: bottom (y=0), left (x=0), diagonal (x+y=1 on right/top side)
+          bottomDist = tLocalY * edgeScale;
+          leftDist = tLocalX * edgeScale;
+          // Distance to diagonal: we're below (x+y<1), normal points toward upper-right
+          diagRightDist = (1.0 - tLocalX - tLocalY) * sqrt2inv * edgeScale;
+          rightDist = diagRightDist; // Diagonal acts as "right" edge
+          topDist = 1.0; // No top edge
           triUpward = 1.0;
         }
       }
@@ -1309,7 +1306,7 @@ const createFragmentShaderSource = () => `
     
     // Edge lines between cells - follows the shape contours
     // Use shapeEdgeDist to create edge effects that match the tessellation shape
-    float edgeLineWidth = u_gapX * 2.0 + 0.01; // Edge line width based on gap setting
+    float edgeLineWidth = 0.018; // Fixed edge line width
     float edgeLine = 1.0 - smoothstep(0.0, edgeLineWidth, shapeEdgeDist);
     
     // Edge color - subtle dark line with warm/cool tints
@@ -1779,8 +1776,6 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
     // Grid controls
     { key: "cols", label: "Columns", min: 1, max: 80, step: 1, section: "grid" },
     { key: "rows", label: "Rows", min: 1, max: 30, step: 1, section: "grid" },
-    { key: "gapX", label: "Gap X", min: 0, max: 0.1, step: 0.001, section: "grid" },
-    { key: "gapY", label: "Gap Y", min: 0, max: 0.1, step: 0.001, section: "grid" },
     // Glass controls
     { key: "refractionStrength", label: "Refraction", min: 0, max: 0.2, step: 0.005, section: "glass" },
     { key: "chromaStrength", label: "Chromatic Aberration", min: 0, max: 0.05, step: 0.001, section: "glass" },
@@ -2637,8 +2632,6 @@ export default function GlassBarShader() {
       time: gl.getUniformLocation(program, "u_time"),
       cols: gl.getUniformLocation(program, "u_cols"),
       rows: gl.getUniformLocation(program, "u_rows"),
-      gapX: gl.getUniformLocation(program, "u_gapX"),
-      gapY: gl.getUniformLocation(program, "u_gapY"),
       refractionStrength: gl.getUniformLocation(program, "u_refractionStrength"),
       chromaStrength: gl.getUniformLocation(program, "u_chromaStrength"),
       speed: gl.getUniformLocation(program, "u_speed"),
@@ -2725,8 +2718,6 @@ export default function GlassBarShader() {
     gl.useProgram(programRef.current);
     gl.uniform1f(locs.cols, params.cols);
     gl.uniform1f(locs.rows, params.rows);
-    gl.uniform1f(locs.gapX, params.gapX);
-    gl.uniform1f(locs.gapY, params.gapY);
     gl.uniform1f(locs.refractionStrength, params.refractionStrength);
     gl.uniform1f(locs.chromaStrength, params.chromaStrength);
     gl.uniform1f(locs.speed, params.speed);
