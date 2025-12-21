@@ -82,71 +82,71 @@ interface ShaderParams {
 }
 
 const defaultParams: ShaderParams = {
-  // Grid - 28 columns, 6 rows to match reference grid pattern exactly
-  cols: 28,
-  rows: 6,
-  // Glass refraction effects - enhanced for internal bending
-  refractionStrength: 0.15,
-  chromaStrength: 0.030,
-  speed: 0.0,
-  noiseScale: 0.25,
-  saturation: 1.55,
+  // Grid - 18 columns, 3 rows (user's saved settings)
+  cols: 18,
+  rows: 3,
+  // Glass refraction effects
+  refractionStrength: 0.11,
+  chromaStrength: 0.0,
+  speed: 3.6,
+  noiseScale: 0.5,
+  saturation: 1.6,
   brightness: 1.0,
-  glassEdgeIntensity: 1.0,
-  causticIntensity: 0.0,
-  vignetteStrength: 0.0,
-  edgeHardness: 0.55,
-  shimmerIntensity: 0.0,
-  // Edge effects - more prominent beveled edges like reference
-  edgeWidth: 0.025,
-  edgeWarmth: 0.85,
-  edgeRefraction: 0.6,
-  edgeBevelDepth: 0.75,
-  edgeChroma: 0.5,
-  // Noise texture - very subtle grain
-  noiseTextureDensity: 800.0,
-  noiseTextureIntensity: 0.012,
-  noiseTextureSaturation: 0.05,
-  noiseTextureSpeed: 0.0,
-  // RGB Color controls - tuned to match reference image exactly
-  // Color 1: Bright Cyan (#60D8F8) - bright cyan-aqua (dominant color)
+  glassEdgeIntensity: 0.7,
+  causticIntensity: 2.0,
+  vignetteStrength: 0.01,
+  edgeHardness: 0.75,
+  shimmerIntensity: 1.1,
+  // Edge effects
+  edgeWidth: 0.01,
+  edgeWarmth: 1.0,
+  edgeRefraction: 0.8,
+  edgeBevelDepth: 0.55,
+  edgeChroma: 0.9,
+  // Noise texture
+  noiseTextureDensity: 1000.0,
+  noiseTextureIntensity: 0.21,
+  noiseTextureSaturation: 0.3,
+  noiseTextureSpeed: 12.0,
+  // RGB Color controls (keeping original colors)
+  // Color 1: Bright Cyan (#60D8F8)
   color1R: 0.38,
   color1G: 0.85,
   color1B: 0.97,
-  // Color 2: Deep Royal Blue (#1535B8) - rich saturated blue
+  // Color 2: Deep Royal Blue (#1535B8)
   color2R: 0.08,
   color2G: 0.21,
   color2B: 0.72,
-  // Color 3: Vermillion Red (#E02010) - vivid red
+  // Color 3: Vermillion Red (#E02010)
   color3R: 0.88,
   color3G: 0.13,
   color3B: 0.06,
-  // Color 4: Golden Orange (#F88515) - warm orange-gold
+  // Color 4: Golden Orange (#F88515)
   color4R: 0.97,
   color4G: 0.52,
   color4B: 0.08,
-  // Color 5: Pink/Magenta (#E058A8) - soft pink-magenta
+  // Color 5: Pink/Magenta (#E058A8)
   color5R: 0.88,
   color5G: 0.35,
   color5B: 0.66,
-  // Color 6: Pure White highlight (#FFFFFF) - pure white
+  // Color 6: Pure White highlight (#FFFFFF)
   color6R: 1.0,
   color6G: 1.0,
   color6B: 1.0,
-  // Color 7: Teal/Aqua (#20E8E0) - bright teal (close to cyan)
+  // Color 7: Teal/Aqua (#20E8E0)
   color7R: 0.13,
   color7G: 0.91,
   color7B: 0.88,
-  // Color 8: Deep Blue (#2830A8) - blue instead of purple
+  // Color 8: Deep Blue (#2830A8)
   color8R: 0.16,
   color8G: 0.19,
   color8B: 0.66,
-  // Color balance - moderate contrast for organic flow
-  colorContrast: 1.45,
-  colorMix: 0.40,
-  // Per-pane variation - enhanced for visible internal bending
-  paneBendVariance: 0.65,
-  paneColorShift: 0.85,
+  // Color balance
+  colorContrast: 1.35,
+  colorMix: 0.6,
+  // Per-pane variation
+  paneBendVariance: 0.55,
+  paneColorShift: 0.7,
   paneDistortVariance: 0.55,
   // Border shape
   borderShape: 0,
