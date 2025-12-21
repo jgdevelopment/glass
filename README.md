@@ -8,7 +8,7 @@ A collection of interactive design experiments built with Next.js, featuring stu
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-## ✨ Featured: Glass Bar Shader
+## Featured: Glass Bar Shader
 
 A real-time WebGL shader that creates a mesmerizing stained glass effect with:
 
@@ -21,7 +21,7 @@ A real-time WebGL shader that creates a mesmerizing stained glass effect with:
 - **Multiple Border Shapes** - Rectangle, triangle, wave, zigzag, and hexagon patterns
 - **Real-time Controls** - Interactive UI to tweak every parameter live
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 

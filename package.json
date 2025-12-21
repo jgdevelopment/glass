@@ -1,7 +1,26 @@
 {
   "name": "design-experiments",
   "version": "0.1.0",
-  "private": true,
+  "description": "A collection of interactive design experiments featuring WebGL shaders, built with Next.js and React",
+  "author": "Jason Ginsberg",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jasonginsberg/design-experiments"
+  },
+  "keywords": [
+    "webgl",
+    "shader",
+    "glass",
+    "refraction",
+    "design",
+    "experiments",
+    "nextjs",
+    "react",
+    "typescript",
+    "creative-coding",
+    "generative-art"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
