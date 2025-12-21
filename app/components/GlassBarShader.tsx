@@ -24,6 +24,43 @@ interface ShaderParams {
   edgeRefraction: number;
   edgeBevelDepth: number;
   edgeChroma: number;
+  // Noise texture controls
+  noiseTextureDensity: number;
+  noiseTextureIntensity: number;
+  noiseTextureSaturation: number;
+  noiseTextureSpeed: number;
+  // RGB Color controls (6 colors for precise matching)
+  // Color 1: Cyan/Light Blue
+  color1R: number;
+  color1G: number;
+  color1B: number;
+  // Color 2: Deep Blue
+  color2R: number;
+  color2G: number;
+  color2B: number;
+  // Color 3: Red
+  color3R: number;
+  color3G: number;
+  color3B: number;
+  // Color 4: Orange/Amber
+  color4R: number;
+  color4G: number;
+  color4B: number;
+  // Color 5: Pink/Magenta
+  color5R: number;
+  color5G: number;
+  color5B: number;
+  // Color 6: Highlight tint
+  color6R: number;
+  color6G: number;
+  color6B: number;
+  // Color balance controls
+  colorContrast: number;
+  colorMix: number;
+  // Per-pane variation controls
+  paneBendVariance: number;
+  paneColorShift: number;
+  paneDistortVariance: number;
 }
 
 const defaultParams: ShaderParams = {
@@ -48,6 +85,43 @@ const defaultParams: ShaderParams = {
   edgeRefraction: 0.6,
   edgeBevelDepth: 0.7,
   edgeChroma: 0.5,
+  // Noise texture defaults
+  noiseTextureDensity: 800.0,
+  noiseTextureIntensity: 0.08,
+  noiseTextureSaturation: 0.3,
+  noiseTextureSpeed: 15.0,
+  // RGB Color controls - tuned to match reference image
+  // Color 1: Bright Cyan (#00D4FF)
+  color1R: 0.0,
+  color1G: 0.83,
+  color1B: 1.0,
+  // Color 2: Deep Royal Blue (#1E3FBF)
+  color2R: 0.12,
+  color2G: 0.25,
+  color2B: 0.75,
+  // Color 3: Vermillion Red (#FF3B30)
+  color3R: 1.0,
+  color3G: 0.23,
+  color3B: 0.19,
+  // Color 4: Orange/Amber (#FF9500)
+  color4R: 1.0,
+  color4G: 0.58,
+  color4B: 0.0,
+  // Color 5: Pink/Magenta (#FF6B9D)
+  color5R: 1.0,
+  color5G: 0.42,
+  color5B: 0.62,
+  // Color 6: Highlight tint (warm white)
+  color6R: 1.0,
+  color6G: 0.98,
+  color6B: 0.95,
+  // Color balance
+  colorContrast: 1.2,
+  colorMix: 0.5,
+  // Per-pane variation
+  paneBendVariance: 0.7,
+  paneColorShift: 0.5,
+  paneDistortVariance: 0.6,
 };
 
 const vertexShaderSource = `
@@ -82,7 +156,93 @@ const createFragmentShaderSource = () => `
   uniform float u_edgeRefraction;
   uniform float u_edgeBevelDepth;
   uniform float u_edgeChroma;
+  uniform float u_noiseTextureDensity;
+  uniform float u_noiseTextureIntensity;
+  uniform float u_noiseTextureSaturation;
+  uniform float u_noiseTextureSpeed;
+  uniform vec3 u_color1;
+  uniform vec3 u_color2;
+  uniform vec3 u_color3;
+  uniform vec3 u_color4;
+  uniform vec3 u_color5;
+  uniform vec3 u_color6;
+  uniform float u_colorContrast;
+  uniform float u_colorMix;
+  uniform float u_paneBendVariance;
+  uniform float u_paneColorShift;
+  uniform float u_paneDistortVariance;
   
+  // Hash function for noise texture (high frequency grain)
+  float hash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+  }
+  
+  // 2D hash for colored noise
+  vec3 hash3(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yxz + 33.33);
+    return fract((p3.xxy + p3.yzz) * p3.zyx);
+  }
+  
+  // Film grain noise texture
+  vec3 getNoiseTexture(vec2 uv, float time) {
+    // Scale UV by density for grain size
+    vec2 noiseUv = uv * u_noiseTextureDensity;
+    
+    // Animate the noise
+    float animOffset = floor(time * u_noiseTextureSpeed);
+    noiseUv += animOffset * 17.31; // offset by animation frame
+    
+    // Get base noise value (grayscale)
+    float grain = hash(noiseUv);
+    
+    // Add some variation at different scales for more natural look
+    grain += hash(noiseUv * 0.5 + 127.1) * 0.5;
+    grain += hash(noiseUv * 2.0 + 53.7) * 0.25;
+    grain = grain / 1.75; // normalize
+    
+    // Center around 0.5 and apply intensity
+    grain = (grain - 0.5) * u_noiseTextureIntensity;
+    
+    // For colored noise, get RGB hash
+    vec3 coloredGrain = hash3(noiseUv) - 0.5;
+    coloredGrain *= u_noiseTextureIntensity;
+    
+    // Mix between grayscale and colored based on saturation
+    vec3 noiseColor = mix(vec3(grain), coloredGrain, u_noiseTextureSaturation);
+    
+    return noiseColor;
+  }
+  
+  // HSL to RGB conversion
+  vec3 hsl2rgb(float h, float s, float l) {
+    h = mod(h, 360.0) / 360.0;
+    float c = (1.0 - abs(2.0 * l - 1.0)) * s;
+    float x = c * (1.0 - abs(mod(h * 6.0, 2.0) - 1.0));
+    float m = l - c * 0.5;
+    vec3 rgb;
+    if (h < 1.0/6.0) rgb = vec3(c, x, 0.0);
+    else if (h < 2.0/6.0) rgb = vec3(x, c, 0.0);
+    else if (h < 3.0/6.0) rgb = vec3(0.0, c, x);
+    else if (h < 4.0/6.0) rgb = vec3(0.0, x, c);
+    else if (h < 5.0/6.0) rgb = vec3(x, 0.0, c);
+    else rgb = vec3(c, 0.0, x);
+    return rgb + m;
+  }
+  
+  // Per-pane hash for unique variation
+  float paneHash(float col, float row) {
+    return fract(sin(col * 127.1 + row * 311.7) * 43758.5453);
+  }
+  
+  vec2 paneHash2(float col, float row) {
+    float h1 = fract(sin(col * 127.1 + row * 311.7) * 43758.5453);
+    float h2 = fract(sin(col * 269.5 + row * 183.3) * 43758.5453);
+    return vec2(h1, h2);
+  }
+
   // Simplex noise functions
   vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
   vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -129,7 +289,9 @@ const createFragmentShaderSource = () => `
   }
   
   // Background color - static regions with hard edges and shimmer
-  vec3 getBackgroundColor(vec2 uv, float time) {
+  // Uses 6 RGB colors for precise color matching
+  // paneColorShift: per-pane color variation (-1 to 1)
+  vec3 getBackgroundColor(vec2 uv, float time, float paneColorShift) {
     // Slow shimmer animation (not flowing)
     float shimmerTime = time * u_speed;
     float shimmerAmt = u_shimmerIntensity;
@@ -139,81 +301,106 @@ const createFragmentShaderSource = () => `
     float n2 = staticNoise(uv * 0.8 * u_noiseScale + vec2(5.2, 3.1), shimmerTime * 0.7, shimmerAmt);
     float n3 = staticNoise(uv * 1.5 * u_noiseScale + vec2(2.7, 8.3), shimmerTime * 0.5, shimmerAmt);
     float n4 = staticNoise(uv * 0.6 * u_noiseScale + vec2(9.1, 1.7), shimmerTime * 0.3, shimmerAmt);
+    float n5 = staticNoise(uv * 1.0 * u_noiseScale + vec2(3.5, 7.2), shimmerTime * 0.4, shimmerAmt);
     
     // Normalize to 0-1
     float t1 = n1 * 0.5 + 0.5;
     float t2 = n2 * 0.5 + 0.5;
     float t3 = n3 * 0.5 + 0.5;
     float t4 = n4 * 0.5 + 0.5;
+    float t5 = n5 * 0.5 + 0.5;
     
-    // Color palette - vibrant colors from reference
+    // Apply contrast adjustment to noise values
+    float contrast = u_colorContrast;
+    t1 = clamp((t1 - 0.5) * contrast + 0.5, 0.0, 1.0);
+    t2 = clamp((t2 - 0.5) * contrast + 0.5, 0.0, 1.0);
+    t3 = clamp((t3 - 0.5) * contrast + 0.5, 0.0, 1.0);
+    t4 = clamp((t4 - 0.5) * contrast + 0.5, 0.0, 1.0);
+    t5 = clamp((t5 - 0.5) * contrast + 0.5, 0.0, 1.0);
+    
+    // Use the 6 RGB colors directly
+    // Color 1: Cyan/Light Blue (primary cool)
+    vec3 cyan = u_color1;
+    vec3 cyanDark = cyan * 0.4;
+    vec3 cyanLight = mix(cyan, vec3(1.0), 0.3);
+    
+    // Color 2: Deep Blue (secondary cool)
+    vec3 deepBlue = u_color2;
+    vec3 deepBlueDark = deepBlue * 0.5;
+    
+    // Color 3: Red (primary warm)
+    vec3 red = u_color3;
+    vec3 redDark = red * 0.6;
+    
+    // Color 4: Orange/Amber (secondary warm)
+    vec3 orange = u_color4;
+    vec3 orangeLight = mix(orange, vec3(1.0), 0.25);
+    
+    // Color 5: Pink/Magenta (accent)
+    vec3 pink = u_color5;
+    vec3 pinkLight = mix(pink, vec3(1.0), 0.3);
+    
+    // Color 6: Highlight tint
+    vec3 highlight = u_color6;
     vec3 white = vec3(1.0, 1.0, 1.0);
-    vec3 paleBlue = vec3(0.88, 0.94, 1.0);
-    vec3 cyan = vec3(0.15, 0.85, 0.98);
-    vec3 brightCyan = vec3(0.45, 0.95, 1.0);
-    vec3 skyBlue = vec3(0.45, 0.75, 1.0);
-    vec3 blue = vec3(0.08, 0.3, 0.92);
-    vec3 deepBlue = vec3(0.02, 0.08, 0.5);
-    vec3 orange = vec3(1.0, 0.45, 0.0);
-    vec3 brightOrange = vec3(1.0, 0.6, 0.1);
-    vec3 yellow = vec3(1.0, 0.9, 0.35);
-    vec3 red = vec3(0.98, 0.08, 0.05);
-    vec3 pink = vec3(0.98, 0.55, 0.7);
-    vec3 magenta = vec3(0.9, 0.2, 0.65);
     vec3 black = vec3(0.0, 0.0, 0.0);
     
-    // Hard edge transition threshold - controlled by edgeHardness
-    // Higher hardness = smaller edgeSoft = sharper transitions
+    // Per-pane color variation - subtle shifts
+    float paneShift = paneColorShift * u_paneColorShift;
+    
+    // Hard edge transition threshold
     float edgeSoft = 0.15 * (1.0 - u_edgeHardness * 0.9);
     
-    // Base - deep blue/black with hard transitions
+    // Base - start with black
     vec3 col = black;
     
-    // Deep blue regions with hard edges
-    col = mix(col, deepBlue, hardStep(0.25, t1, edgeSoft));
+    // === BLUE/CYAN REGIONS ===
+    // Deep blue base
+    col = mix(col, deepBlueDark, hardStep(0.2, t1, edgeSoft));
+    col = mix(col, deepBlue, hardStep(0.35, t1, edgeSoft) * hardStep(0.25, t2, edgeSoft));
     
-    // Blue regions
-    col = mix(col, blue, hardStep(0.35, t1, edgeSoft) * hardStep(0.3, t2, edgeSoft));
-    
-    // Sky blue with harder edges
-    float skyMask = hardStep(0.45, t1, edgeSoft) * hardStep(0.4, t2, edgeSoft);
-    col = mix(col, skyBlue, skyMask);
-    
-    // Cyan areas - vibrant
-    float cyanMask = hardStep(0.55, t1, edgeSoft) * hardStep(0.5, t3, edgeSoft);
+    // Cyan areas
+    float cyanMask = hardStep(0.45, t1, edgeSoft) * hardStep(0.4, t2, edgeSoft);
     col = mix(col, cyan, cyanMask);
-    col = mix(col, brightCyan, hardStep(0.65, t2, edgeSoft) * cyanMask);
+    col = mix(col, cyanLight, cyanMask * hardStep(0.6, t3, edgeSoft));
     
-    // WHITE/BRIGHT REGIONS - key feature from reference
-    float whiteMask = hardStep(0.7, t1, 0.06) * hardStep(0.65, t2, 0.06);
-    whiteMask = max(whiteMask, hardStep(0.75, t4, 0.05) * hardStep(0.7, t3, 0.05));
-    col = mix(col, paleBlue, whiteMask);
-    col = mix(col, white, whiteMask * hardStep(0.8, t3, 0.04));
-    
-    // WARM COLOR ZONES - orange, red with hard edges
-    float warmBase = hardStep(0.4, t3, edgeSoft) * (1.0 - hardStep(0.6, t1, edgeSoft));
-    
-    // Yellow fringe
-    col = mix(col, yellow, warmBase * hardStep(0.35, t4, edgeSoft) * 0.6);
-    
-    // Orange core
-    float orangeMask = warmBase * hardStep(0.45, t2, edgeSoft);
-    col = mix(col, brightOrange, orangeMask);
-    col = mix(col, orange, orangeMask * hardStep(0.55, t4, edgeSoft));
-    
-    // Red hot spots
-    float redMask = warmBase * hardStep(0.6, t3, 0.05) * hardStep(0.55, t4, 0.05);
+    // === RED REGIONS ===
+    float redBase = hardStep(0.35, t3, edgeSoft) * (1.0 - hardStep(0.55, t1, edgeSoft));
+    float redMask = redBase * hardStep(0.45, t4, edgeSoft);
+    col = mix(col, redDark, redBase * 0.7);
     col = mix(col, red, redMask);
     
-    // Pink/magenta accents
-    float pinkZone = hardStep(0.5, t2, edgeSoft) * hardStep(0.55, t3, edgeSoft);
-    pinkZone *= (1.0 - warmBase * 0.7) * (1.0 - whiteMask);
-    col = mix(col, pink, pinkZone * 0.5);
-    col = mix(col, magenta, pinkZone * hardStep(0.65, t1, 0.06) * 0.6);
+    // === ORANGE/AMBER REGIONS ===
+    float warmBase = hardStep(0.4, t4, edgeSoft) * hardStep(0.3, t5, edgeSoft);
+    warmBase *= (1.0 - hardStep(0.65, t1, edgeSoft));
     
-    // Dark/black regions for high contrast
-    float darkMask = (1.0 - hardStep(0.2, t1, edgeSoft)) * (1.0 - hardStep(0.25, t2, edgeSoft));
+    col = mix(col, orange, warmBase * 0.8);
+    col = mix(col, orangeLight, warmBase * hardStep(0.55, t2, edgeSoft) * 0.6);
+    
+    // Hot orange spots
+    float hotMask = warmBase * hardStep(0.6, t3, 0.05) * hardStep(0.55, t4, 0.05);
+    col = mix(col, orange * 1.1, hotMask);
+    
+    // === PINK/MAGENTA ACCENTS ===
+    float pinkZone = hardStep(0.5, t2, edgeSoft) * hardStep(0.45, t5, edgeSoft);
+    pinkZone *= (1.0 - warmBase * 0.5) * (1.0 - cyanMask * 0.5);
+    col = mix(col, pink, pinkZone * 0.6);
+    col = mix(col, pinkLight, pinkZone * hardStep(0.65, t1, 0.06) * 0.5);
+    
+    // === WHITE/HIGHLIGHT REGIONS ===
+    float whiteMask = hardStep(0.7, t1, 0.06) * hardStep(0.65, t2, 0.06);
+    whiteMask = max(whiteMask, hardStep(0.75, t4, 0.05) * hardStep(0.7, t3, 0.05));
+    col = mix(col, highlight, whiteMask);
+    col = mix(col, white, whiteMask * hardStep(0.8, t3, 0.04));
+    
+    // === BLACK/SHADOW REGIONS ===
+    float darkMask = (1.0 - hardStep(0.18, t1, edgeSoft)) * (1.0 - hardStep(0.22, t2, edgeSoft));
     col = mix(col, black, darkMask);
+    
+    // Add some color bleeding between regions for smoother transitions
+    float bleedMask = hardStep(0.4, t5, 0.1) * (1.0 - hardStep(0.6, t5, 0.1));
+    vec3 blendColor = mix(cyan, orange, t3);
+    col = mix(col, blendColor, bleedMask * 0.15 * u_colorMix);
     
     // Boost saturation
     float lum = dot(col, vec3(0.299, 0.587, 0.114));
@@ -223,6 +410,11 @@ const createFragmentShaderSource = () => `
     col *= u_brightness;
     
     return col;
+  }
+  
+  // Overload for backward compatibility
+  vec3 getBackgroundColor(vec2 uv, float time) {
+    return getBackgroundColor(uv, time, 0.0);
   }
   
   void main() {
@@ -255,24 +447,43 @@ const createFragmentShaderSource = () => `
     float centerDist = (barX - 0.5) * 2.0; // -1 to 1
     float glassProfile = 1.0 - centerDist * centerDist;
     
-    // Refraction offset - static lens distortion
-    float refractionStrength = u_refractionStrength;
+    // === PER-PANE VARIATION ===
+    vec2 paneRand = paneHash2(colIndex, rowIndex);
+    float paneRand3 = paneHash(colIndex + 100.0, rowIndex + 50.0);
+    
+    // Per-pane bend direction and strength
+    float paneBendDir = (paneRand.x - 0.5) * 2.0; // -1 to 1
+    float paneBendAmt = paneRand.y * u_paneBendVariance;
+    
+    // Per-pane distortion multiplier
+    float paneDistortMult = 1.0 + (paneRand3 - 0.5) * u_paneDistortVariance * 2.0;
+    
+    // Per-pane hue shift
+    float paneHueShift = (paneRand.x + paneRand.y - 1.0); // -1 to 1
+    
+    // Refraction offset - static lens distortion with per-pane variation
+    float refractionStrength = u_refractionStrength * paneDistortMult;
+    
+    // Add per-pane bend: some panes curve left, some right, some straight
+    float bendOffset = paneBendDir * paneBendAmt * 0.1 * glassProfile;
+    float verticalBend = (paneRand3 - 0.5) * paneBendAmt * 0.05 * (1.0 - abs(centerDist));
+    
     vec2 refractOffset = vec2(
-      centerDist * refractionStrength * glassProfile,
-      0.0
+      centerDist * refractionStrength * glassProfile + bendOffset,
+      verticalBend
     );
     
     // Subtle vertical lens distortion
-    float verticalRefract = sin(centerDist * 3.14159) * 0.01;
+    float verticalRefract = sin(centerDist * 3.14159) * 0.01 * paneDistortMult;
     refractOffset.y += verticalRefract;
     
     // Base UV for sampling background - static per bar
     vec2 sampleUv = uv + refractOffset;
     
-    // Per-bar unique offset (static, not animated)
+    // Per-bar unique offset (static, not animated) - enhanced variation
     float barSeed = colIndex * 0.73 + rowIndex * 1.37;
-    float barOffsetX = sin(barSeed) * 0.012;
-    float barOffsetY = cos(barSeed * 1.3) * 0.008;
+    float barOffsetX = sin(barSeed) * 0.012 * (1.0 + paneBendAmt * 0.5);
+    float barOffsetY = cos(barSeed * 1.3) * 0.008 * (1.0 + paneBendAmt * 0.5);
     sampleUv.x += barOffsetX;
     sampleUv.y += barOffsetY;
     
@@ -282,20 +493,28 @@ const createFragmentShaderSource = () => `
     
     // STRONG CHROMATIC ABERRATION - key feature from reference
     float chromaBase = u_chromaStrength;
-    // Chromatic aberration increases toward edges of each bar
-    float chromaEdge = chromaBase * (1.0 + abs(centerDist) * 2.0);
+    // Chromatic aberration increases toward edges of each bar + per-pane variation
+    float chromaVariance = 1.0 + (paneRand.x - 0.5) * u_paneBendVariance;
+    float chromaEdge = chromaBase * (1.0 + abs(centerDist) * 2.0) * chromaVariance;
+    
+    // Per-pane chromatic direction variation
+    float chromaAngle = paneRand.y * 3.14159 * 0.3 * u_paneBendVariance;
+    vec2 chromaDir = vec2(cos(chromaAngle), sin(chromaAngle));
     
     vec3 col;
-    // Red channel - shifted right/positive
-    vec2 redUv = sampleUv + vec2(chromaEdge, chromaEdge * 0.3);
-    col.r = getBackgroundColor(redUv * vec2(aspect * 0.5, 1.0), u_time).r;
+    // Red channel - shifted with per-pane direction
+    vec2 redOffset = chromaDir * chromaEdge + vec2(chromaEdge * 0.3, 0.0);
+    vec2 redUv = sampleUv + redOffset;
+    col.r = getBackgroundColor(redUv * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).r;
     
-    // Green channel - center
-    col.g = getBackgroundColor(sampleUv * vec2(aspect * 0.5, 1.0), u_time).g;
+    // Green channel - center with slight per-pane variation
+    vec2 greenUv = sampleUv + chromaDir * chromaEdge * 0.1;
+    col.g = getBackgroundColor(greenUv * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).g;
     
-    // Blue channel - shifted left/negative
-    vec2 blueUv = sampleUv - vec2(chromaEdge, chromaEdge * 0.2);
-    col.b = getBackgroundColor(blueUv * vec2(aspect * 0.5, 1.0), u_time).b;
+    // Blue channel - shifted opposite direction
+    vec2 blueOffset = -chromaDir * chromaEdge + vec2(-chromaEdge * 0.2, 0.0);
+    vec2 blueUv = sampleUv + blueOffset;
+    col.b = getBackgroundColor(blueUv * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).b;
     
     // === ADVANCED GLASS EDGE EFFECTS ===
     float edgeIntensity = u_glassEdgeIntensity;
@@ -338,38 +557,60 @@ const createFragmentShaderSource = () => `
     // Right edge bevel
     float rightInnerZone = smoothstep(edgeW * 0.4, edgeW * 0.8, rightDist) * (1.0 - smoothstep(edgeW * 0.8, innerBevelEnd * 0.7, rightDist));
     
-    // TOP EDGE
-    float topLine = smoothstep(0.0, edgeSoftness * 1.5, topDist);
-    topLine *= (1.0 - smoothstep(edgeW * 0.8, edgeW * 1.2, topDist));
+    // TOP EDGE - Cool blue/white highlight (same treatment as right edge)
+    float topPrimaryLine = smoothstep(0.0, edgeSoftness, topDist);
+    topPrimaryLine *= (1.0 - smoothstep(edgeW * 0.5, edgeW * 0.8, topDist));
     
-    // BOTTOM EDGE - Warm amber
-    float bottomLine = smoothstep(0.0, edgeSoftness * 1.5, bottomDist);
-    bottomLine *= (1.0 - smoothstep(edgeW * 0.8, edgeW * 1.2, bottomDist));
+    // Top edge inner gradient
+    float topInnerZone = smoothstep(edgeW * 0.4, edgeW * 0.8, topDist) * (1.0 - smoothstep(edgeW * 0.8, innerBevelEnd * 0.7, topDist));
+    
+    // BOTTOM EDGE - Warm orange/amber (same treatment as left edge)
+    float bottomPrimaryLine = smoothstep(0.0, edgeSoftness, bottomDist);
+    bottomPrimaryLine *= (1.0 - smoothstep(edgeW * 0.6, edgeW, bottomDist));
+    
+    // Bottom edge inner gradient
+    float bottomInnerZone = smoothstep(edgeW * 0.5, innerBevelStart, bottomDist) * (1.0 - smoothstep(innerBevelStart, innerBevelEnd, bottomDist));
     
     // === CHROMATIC EDGE REFRACTION ===
     // Create color splitting at edges like real glass refraction
     float leftEdgeZone = 1.0 - smoothstep(0.0, innerBevelEnd * 1.5, leftDist);
     float rightEdgeZone = 1.0 - smoothstep(0.0, innerBevelEnd * 1.2, rightDist);
+    float topEdgeZone = 1.0 - smoothstep(0.0, innerBevelEnd * 1.2, topDist);
+    float bottomEdgeZone = 1.0 - smoothstep(0.0, innerBevelEnd * 1.5, bottomDist);
     
     // Shift red channel outward at left edge, blue at right edge
     float edgeChromaShift = edgeChromaAmt * 0.15;
     vec2 leftChromaOffset = vec2(-edgeChromaShift * leftEdgeZone, 0.0);
     vec2 rightChromaOffset = vec2(edgeChromaShift * rightEdgeZone, 0.0);
+    vec2 topChromaOffset = vec2(0.0, edgeChromaShift * topEdgeZone);
+    vec2 bottomChromaOffset = vec2(0.0, -edgeChromaShift * bottomEdgeZone);
     
     // Sample with chromatic offset at edges
     vec3 leftEdgeColor = vec3(0.0);
-    leftEdgeColor.r = getBackgroundColor((sampleUv + leftChromaOffset + vec2(edgeRefract * 0.02 * leftEdgeZone, 0.0)) * vec2(aspect * 0.5, 1.0), u_time).r;
-    leftEdgeColor.g = getBackgroundColor((sampleUv + leftChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time).g;
-    leftEdgeColor.b = getBackgroundColor((sampleUv - leftChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time).b;
+    leftEdgeColor.r = getBackgroundColor((sampleUv + leftChromaOffset + vec2(edgeRefract * 0.02 * leftEdgeZone, 0.0)) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).r;
+    leftEdgeColor.g = getBackgroundColor((sampleUv + leftChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).g;
+    leftEdgeColor.b = getBackgroundColor((sampleUv - leftChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).b;
     
     vec3 rightEdgeColor = vec3(0.0);
-    rightEdgeColor.r = getBackgroundColor((sampleUv + rightChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time).r;
-    rightEdgeColor.g = getBackgroundColor((sampleUv + rightChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time).g;
-    rightEdgeColor.b = getBackgroundColor((sampleUv + rightChromaOffset - vec2(edgeRefract * 0.015 * rightEdgeZone, 0.0)) * vec2(aspect * 0.5, 1.0), u_time).b;
+    rightEdgeColor.r = getBackgroundColor((sampleUv + rightChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).r;
+    rightEdgeColor.g = getBackgroundColor((sampleUv + rightChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).g;
+    rightEdgeColor.b = getBackgroundColor((sampleUv + rightChromaOffset - vec2(edgeRefract * 0.015 * rightEdgeZone, 0.0)) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).b;
+    
+    vec3 topEdgeColor = vec3(0.0);
+    topEdgeColor.r = getBackgroundColor((sampleUv + topChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).r;
+    topEdgeColor.g = getBackgroundColor((sampleUv + topChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).g;
+    topEdgeColor.b = getBackgroundColor((sampleUv + topChromaOffset - vec2(0.0, edgeRefract * 0.015 * topEdgeZone)) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).b;
+    
+    vec3 bottomEdgeColor = vec3(0.0);
+    bottomEdgeColor.r = getBackgroundColor((sampleUv + bottomChromaOffset + vec2(0.0, edgeRefract * 0.02 * bottomEdgeZone)) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).r;
+    bottomEdgeColor.g = getBackgroundColor((sampleUv + bottomChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).g;
+    bottomEdgeColor.b = getBackgroundColor((sampleUv - bottomChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time, paneHueShift).b;
     
     // Blend edge refracted colors
     col = mix(col, leftEdgeColor, leftEdgeZone * edgeRefract * 0.5);
     col = mix(col, rightEdgeColor, rightEdgeZone * edgeRefract * 0.4);
+    col = mix(col, topEdgeColor, topEdgeZone * edgeRefract * 0.4);
+    col = mix(col, bottomEdgeColor, bottomEdgeZone * edgeRefract * 0.5);
     
     // === APPLY EDGE HIGHLIGHTS ===
     // Left edge - warm orange/amber primary line
@@ -380,19 +621,25 @@ const createFragmentShaderSource = () => `
     col = mix(col, coolHighlight, rightPrimaryLine * 0.5 * edgeIntensity);
     col += coolHighlight * rightInnerZone * 0.15 * edgeIntensity;
     
-    // Top edge - subtle cool
-    col += mix(coolHighlight, whiteHighlight, 0.5) * topLine * 0.35 * edgeIntensity;
+    // Top edge - cool blue/white (same treatment as right edge)
+    col = mix(col, coolHighlight, topPrimaryLine * 0.5 * edgeIntensity);
+    col += coolHighlight * topInnerZone * 0.15 * edgeIntensity;
     
-    // Bottom edge - warm amber
-    col += mix(warmHighlight, amber, 0.4) * bottomLine * 0.4 * edgeIntensity;
+    // Bottom edge - warm orange/amber (same treatment as left edge)
+    col = mix(col, warmHighlight, bottomPrimaryLine * 0.85 * edgeIntensity);
+    col += amber * bottomInnerZone * 0.25 * edgeIntensity * warmth;
     
     // === BEVEL DEPTH SHADING ===
     // Darken inner bevel zone to create depth illusion
     float leftBevelShadow = smoothstep(edgeW, edgeW * 2.5, leftDist) * (1.0 - smoothstep(edgeW * 2.5, edgeW * 5.0, leftDist));
     float rightBevelShadow = smoothstep(edgeW * 0.8, edgeW * 2.0, rightDist) * (1.0 - smoothstep(edgeW * 2.0, edgeW * 4.0, rightDist));
+    float topBevelShadow = smoothstep(edgeW * 0.8, edgeW * 2.0, topDist) * (1.0 - smoothstep(edgeW * 2.0, edgeW * 4.0, topDist));
+    float bottomBevelShadow = smoothstep(edgeW, edgeW * 2.5, bottomDist) * (1.0 - smoothstep(edgeW * 2.5, edgeW * 5.0, bottomDist));
     
     col *= mix(1.0, 0.88, leftBevelShadow * bevelDepth * 0.5);
     col *= mix(1.0, 0.92, rightBevelShadow * bevelDepth * 0.35);
+    col *= mix(1.0, 0.92, topBevelShadow * bevelDepth * 0.35);
+    col *= mix(1.0, 0.88, bottomBevelShadow * bevelDepth * 0.5);
     
     // === CORNER ACCENTS ===
     // Warm corners where edges meet
@@ -420,6 +667,10 @@ const createFragmentShaderSource = () => `
     vec3 gapColor = vec3(0.005, 0.008, 0.02);
     col = mix(gapColor, col, barMask);
     
+    // Apply noise texture overlay
+    vec3 noiseTexture = getNoiseTexture(uv, u_time);
+    col += noiseTexture * barMask; // Only apply noise inside bars, not in gaps
+    
     // Subtle vignette
     vec2 vignetteUv = uv - 0.5;
     float vignette = 1.0 - dot(vignetteUv, vignetteUv) * u_vignetteStrength;
@@ -436,12 +687,127 @@ interface ControlPanelProps {
   onSave: () => void;
 }
 
+// Helper to convert RGB (0-1) to hex
+function rgbToHex(r: number, g: number, b: number): string {
+  const toHex = (v: number) => Math.round(v * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+// Helper to convert hex to RGB (0-1)
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (result) {
+    return {
+      r: parseInt(result[1], 16) / 255,
+      g: parseInt(result[2], 16) / 255,
+      b: parseInt(result[3], 16) / 255,
+    };
+  }
+  return { r: 0, g: 0, b: 0 };
+}
+
+interface ColorPickerProps {
+  label: string;
+  colorR: number;
+  colorG: number;
+  colorB: number;
+  onChange: (r: number, g: number, b: number) => void;
+}
+
+function ColorPicker({ label, colorR, colorG, colorB, onChange }: ColorPickerProps) {
+  const hexValue = rgbToHex(colorR, colorG, colorB);
+  
+  const handleColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rgb = hexToRgb(e.target.value);
+    onChange(rgb.r, rgb.g, rgb.b);
+  };
+  
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 6,
+        }}
+      >
+        <label
+          style={{
+            color: "rgba(255, 255, 255, 0.8)",
+            fontSize: 12,
+            fontWeight: 500,
+          }}
+        >
+          {label}
+        </label>
+        <span
+          style={{
+            color: "rgba(255, 255, 255, 0.5)",
+            fontSize: 11,
+            fontFamily: "monospace",
+            background: "rgba(255, 255, 255, 0.1)",
+            padding: "2px 6px",
+            borderRadius: 4,
+          }}
+        >
+          {hexValue.toUpperCase()}
+        </span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input
+          type="color"
+          value={hexValue}
+          onChange={handleColorChange}
+          style={{
+            width: 40,
+            height: 28,
+            border: "1px solid rgba(255, 255, 255, 0.2)",
+            borderRadius: 6,
+            cursor: "pointer",
+            background: "transparent",
+            padding: 0,
+          }}
+        />
+        <div
+          style={{
+            flex: 1,
+            height: 28,
+            borderRadius: 6,
+            background: `linear-gradient(to right, ${hexValue}, ${hexValue})`,
+            border: "1px solid rgba(255, 255, 255, 0.15)",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [activeSection, setActiveSection] = useState<string>("colors");
 
   const handleChange = (key: keyof ShaderParams, value: number) => {
     onChange({ ...params, [key]: value });
   };
+  
+  const handleColorChange = (colorPrefix: string) => (r: number, g: number, b: number) => {
+    onChange({
+      ...params,
+      [`${colorPrefix}R`]: r,
+      [`${colorPrefix}G`]: g,
+      [`${colorPrefix}B`]: b,
+    } as ShaderParams);
+  };
+
+  const colorControls = [
+    { prefix: "color1", label: "Cyan / Light Blue" },
+    { prefix: "color2", label: "Deep Blue" },
+    { prefix: "color3", label: "Red" },
+    { prefix: "color4", label: "Orange / Amber" },
+    { prefix: "color5", label: "Pink / Magenta" },
+    { prefix: "color6", label: "Highlight Tint" },
+  ];
 
   const controls: {
     key: keyof ShaderParams;
@@ -449,27 +815,54 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
     min: number;
     max: number;
     step: number;
+    section: string;
   }[] = [
-    { key: "cols", label: "Columns", min: 1, max: 80, step: 1 },
-    { key: "rows", label: "Rows", min: 1, max: 30, step: 1 },
-    { key: "gapX", label: "Gap X", min: 0, max: 0.1, step: 0.001 },
-    { key: "gapY", label: "Gap Y", min: 0, max: 0.1, step: 0.001 },
-    { key: "refractionStrength", label: "Refraction", min: 0, max: 0.2, step: 0.005 },
-    { key: "chromaStrength", label: "Chromatic Aberration", min: 0, max: 0.05, step: 0.001 },
-    { key: "speed", label: "Animation Speed", min: 0, max: 5, step: 0.1 },
-    { key: "noiseScale", label: "Noise Scale", min: 0.1, max: 3, step: 0.1 },
-    { key: "saturation", label: "Saturation", min: 0, max: 3, step: 0.1 },
-    { key: "brightness", label: "Brightness", min: 0.1, max: 2, step: 0.05 },
-    { key: "glassEdgeIntensity", label: "Glass Edge Intensity", min: 0, max: 2, step: 0.1 },
-    { key: "edgeWidth", label: "Edge Width", min: 0.01, max: 0.1, step: 0.005 },
-    { key: "edgeWarmth", label: "Edge Warmth", min: 0, max: 1, step: 0.05 },
-    { key: "edgeRefraction", label: "Edge Refraction", min: 0, max: 1, step: 0.05 },
-    { key: "edgeBevelDepth", label: "Edge Bevel Depth", min: 0, max: 1, step: 0.05 },
-    { key: "edgeChroma", label: "Edge Chroma Split", min: 0, max: 1, step: 0.05 },
-    { key: "causticIntensity", label: "Caustic Intensity", min: 0, max: 3, step: 0.1 },
-    { key: "vignetteStrength", label: "Vignette", min: 0, max: 0.5, step: 0.01 },
-    { key: "edgeHardness", label: "Color Edge Hardness", min: 0, max: 1, step: 0.05 },
-    { key: "shimmerIntensity", label: "Shimmer Intensity", min: 0, max: 2, step: 0.1 },
+    // Grid controls
+    { key: "cols", label: "Columns", min: 1, max: 80, step: 1, section: "grid" },
+    { key: "rows", label: "Rows", min: 1, max: 30, step: 1, section: "grid" },
+    { key: "gapX", label: "Gap X", min: 0, max: 0.1, step: 0.001, section: "grid" },
+    { key: "gapY", label: "Gap Y", min: 0, max: 0.1, step: 0.001, section: "grid" },
+    // Glass controls
+    { key: "refractionStrength", label: "Refraction", min: 0, max: 0.2, step: 0.005, section: "glass" },
+    { key: "chromaStrength", label: "Chromatic Aberration", min: 0, max: 0.05, step: 0.001, section: "glass" },
+    { key: "glassEdgeIntensity", label: "Glass Edge Intensity", min: 0, max: 2, step: 0.1, section: "glass" },
+    { key: "edgeWidth", label: "Edge Width", min: 0.01, max: 0.1, step: 0.005, section: "glass" },
+    { key: "edgeWarmth", label: "Edge Warmth", min: 0, max: 1, step: 0.05, section: "glass" },
+    { key: "edgeRefraction", label: "Edge Refraction", min: 0, max: 1, step: 0.05, section: "glass" },
+    { key: "edgeBevelDepth", label: "Edge Bevel Depth", min: 0, max: 1, step: 0.05, section: "glass" },
+    { key: "edgeChroma", label: "Edge Chroma Split", min: 0, max: 1, step: 0.05, section: "glass" },
+    // Color controls
+    { key: "colorContrast", label: "Color Contrast", min: 0.5, max: 2, step: 0.05, section: "colors" },
+    { key: "colorMix", label: "Color Blending", min: 0, max: 1, step: 0.05, section: "colors" },
+    { key: "saturation", label: "Saturation", min: 0, max: 3, step: 0.1, section: "colors" },
+    { key: "brightness", label: "Brightness", min: 0.1, max: 2, step: 0.05, section: "colors" },
+    { key: "edgeHardness", label: "Color Edge Hardness", min: 0, max: 1, step: 0.05, section: "colors" },
+    // Animation controls
+    { key: "speed", label: "Animation Speed", min: 0, max: 5, step: 0.1, section: "animation" },
+    { key: "shimmerIntensity", label: "Shimmer Intensity", min: 0, max: 2, step: 0.1, section: "animation" },
+    { key: "causticIntensity", label: "Caustic Intensity", min: 0, max: 3, step: 0.1, section: "animation" },
+    // Noise controls
+    { key: "noiseScale", label: "Pattern Scale", min: 0.1, max: 3, step: 0.1, section: "noise" },
+    { key: "noiseTextureDensity", label: "Noise Density", min: 100, max: 2000, step: 50, section: "noise" },
+    { key: "noiseTextureIntensity", label: "Noise Intensity", min: 0, max: 0.3, step: 0.01, section: "noise" },
+    { key: "noiseTextureSaturation", label: "Noise Color", min: 0, max: 1, step: 0.05, section: "noise" },
+    { key: "noiseTextureSpeed", label: "Noise Animation", min: 0, max: 60, step: 1, section: "noise" },
+    // Per-pane variation
+    { key: "paneBendVariance", label: "Pane Bend Variance", min: 0, max: 1, step: 0.05, section: "pane" },
+    { key: "paneColorShift", label: "Pane Color Shift", min: 0, max: 1, step: 0.05, section: "pane" },
+    { key: "paneDistortVariance", label: "Pane Distort Variance", min: 0, max: 1, step: 0.05, section: "pane" },
+    // Other
+    { key: "vignetteStrength", label: "Vignette", min: 0, max: 0.5, step: 0.01, section: "other" },
+  ];
+  
+  const sections = [
+    { id: "colors", label: "🎨 Colors" },
+    { id: "grid", label: "📐 Grid" },
+    { id: "glass", label: "🔮 Glass" },
+    { id: "animation", label: "✨ Animation" },
+    { id: "noise", label: "📺 Noise" },
+    { id: "pane", label: "🪟 Pane Variation" },
+    { id: "other", label: "⚙️ Other" },
   ];
 
   return (
@@ -547,58 +940,107 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
             flex: 1,
           }}
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {controls.map(({ key, label, min, max, step }) => (
-              <div key={key}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: 6,
-                  }}
-                >
-                  <label
-                    style={{
-                      color: "rgba(255, 255, 255, 0.8)",
-                      fontSize: 12,
-                      fontWeight: 500,
-                    }}
-                  >
-                    {label}
-                  </label>
-                  <span
-                    style={{
-                      color: "rgba(255, 255, 255, 0.5)",
-                      fontSize: 11,
-                      fontFamily: "monospace",
-                      background: "rgba(255, 255, 255, 0.1)",
-                      padding: "2px 6px",
-                      borderRadius: 4,
-                    }}
-                  >
-                    {params[key].toFixed(step < 1 ? String(step).split(".")[1]?.length || 2 : 0)}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={min}
-                  max={max}
-                  step={step}
-                  value={params[key]}
-                  onChange={(e) => handleChange(key, parseFloat(e.target.value))}
-                  style={{
-                    width: "100%",
-                    height: 6,
-                    borderRadius: 3,
-                    appearance: "none",
-                    background: "rgba(255, 255, 255, 0.15)",
-                    cursor: "pointer",
-                    outline: "none",
-                  }}
-                />
-              </div>
+          {/* Section Tabs */}
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 4,
+              marginBottom: 16,
+            }}
+          >
+            {sections.map(({ id, label }) => (
+              <button
+                key={id}
+                onClick={() => setActiveSection(id)}
+                style={{
+                  padding: "6px 10px",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  background: activeSection === id ? "rgba(255, 255, 255, 0.2)" : "rgba(255, 255, 255, 0.05)",
+                  border: activeSection === id ? "1px solid rgba(255, 255, 255, 0.3)" : "1px solid rgba(255, 255, 255, 0.1)",
+                  borderRadius: 6,
+                  color: activeSection === id ? "rgba(255, 255, 255, 0.95)" : "rgba(255, 255, 255, 0.6)",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                {label}
+              </button>
             ))}
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* Color Pickers for Colors Section */}
+            {activeSection === "colors" && (
+              <div style={{ marginBottom: 8 }}>
+                {colorControls.map(({ prefix, label }) => (
+                  <ColorPicker
+                    key={prefix}
+                    label={label}
+                    colorR={params[`${prefix}R` as keyof ShaderParams] as number}
+                    colorG={params[`${prefix}G` as keyof ShaderParams] as number}
+                    colorB={params[`${prefix}B` as keyof ShaderParams] as number}
+                    onChange={handleColorChange(prefix)}
+                  />
+                ))}
+              </div>
+            )}
+            
+            {/* Slider Controls */}
+            {controls
+              .filter(({ section }) => section === activeSection)
+              .map(({ key, label, min, max, step }) => (
+                <div key={key}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: 6,
+                    }}
+                  >
+                    <label
+                      style={{
+                        color: "rgba(255, 255, 255, 0.8)",
+                        fontSize: 12,
+                        fontWeight: 500,
+                      }}
+                    >
+                      {label}
+                    </label>
+                    <span
+                      style={{
+                        color: "rgba(255, 255, 255, 0.5)",
+                        fontSize: 11,
+                        fontFamily: "monospace",
+                        background: "rgba(255, 255, 255, 0.1)",
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                      }}
+                    >
+                      {params[key].toFixed(step < 1 ? String(step).split(".")[1]?.length || 2 : 0)}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={min}
+                    max={max}
+                    step={step}
+                    value={params[key]}
+                    onChange={(e) => handleChange(key, parseFloat(e.target.value))}
+                    style={{
+                      width: "100%",
+                      height: 6,
+                      borderRadius: 3,
+                      appearance: "none",
+                      background: "rgba(255, 255, 255, 0.15)",
+                      cursor: "pointer",
+                      outline: "none",
+                    }}
+                  />
+                </div>
+              ))}
           </div>
 
           {/* Buttons */}
@@ -800,6 +1242,21 @@ export default function GlassBarShader() {
       edgeRefraction: gl.getUniformLocation(program, "u_edgeRefraction"),
       edgeBevelDepth: gl.getUniformLocation(program, "u_edgeBevelDepth"),
       edgeChroma: gl.getUniformLocation(program, "u_edgeChroma"),
+      noiseTextureDensity: gl.getUniformLocation(program, "u_noiseTextureDensity"),
+      noiseTextureIntensity: gl.getUniformLocation(program, "u_noiseTextureIntensity"),
+      noiseTextureSaturation: gl.getUniformLocation(program, "u_noiseTextureSaturation"),
+      noiseTextureSpeed: gl.getUniformLocation(program, "u_noiseTextureSpeed"),
+      color1: gl.getUniformLocation(program, "u_color1"),
+      color2: gl.getUniformLocation(program, "u_color2"),
+      color3: gl.getUniformLocation(program, "u_color3"),
+      color4: gl.getUniformLocation(program, "u_color4"),
+      color5: gl.getUniformLocation(program, "u_color5"),
+      color6: gl.getUniformLocation(program, "u_color6"),
+      colorContrast: gl.getUniformLocation(program, "u_colorContrast"),
+      colorMix: gl.getUniformLocation(program, "u_colorMix"),
+      paneBendVariance: gl.getUniformLocation(program, "u_paneBendVariance"),
+      paneColorShift: gl.getUniformLocation(program, "u_paneColorShift"),
+      paneDistortVariance: gl.getUniformLocation(program, "u_paneDistortVariance"),
     };
 
     function resize() {
@@ -870,6 +1327,21 @@ export default function GlassBarShader() {
     gl.uniform1f(locs.edgeRefraction, params.edgeRefraction);
     gl.uniform1f(locs.edgeBevelDepth, params.edgeBevelDepth);
     gl.uniform1f(locs.edgeChroma, params.edgeChroma);
+    gl.uniform1f(locs.noiseTextureDensity, params.noiseTextureDensity);
+    gl.uniform1f(locs.noiseTextureIntensity, params.noiseTextureIntensity);
+    gl.uniform1f(locs.noiseTextureSaturation, params.noiseTextureSaturation);
+    gl.uniform1f(locs.noiseTextureSpeed, params.noiseTextureSpeed);
+    gl.uniform3f(locs.color1, params.color1R, params.color1G, params.color1B);
+    gl.uniform3f(locs.color2, params.color2R, params.color2G, params.color2B);
+    gl.uniform3f(locs.color3, params.color3R, params.color3G, params.color3B);
+    gl.uniform3f(locs.color4, params.color4R, params.color4G, params.color4B);
+    gl.uniform3f(locs.color5, params.color5R, params.color5G, params.color5B);
+    gl.uniform3f(locs.color6, params.color6R, params.color6G, params.color6B);
+    gl.uniform1f(locs.colorContrast, params.colorContrast);
+    gl.uniform1f(locs.colorMix, params.colorMix);
+    gl.uniform1f(locs.paneBendVariance, params.paneBendVariance);
+    gl.uniform1f(locs.paneColorShift, params.paneColorShift);
+    gl.uniform1f(locs.paneDistortVariance, params.paneDistortVariance);
   }, [params]);
 
   return (
