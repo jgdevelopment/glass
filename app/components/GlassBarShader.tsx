@@ -47,89 +47,80 @@ const fragmentShaderSource = `
     return 130.0 * dot(m, g);
   }
   
-  float fbm(vec2 p) {
+  // Smooth organic noise - less octaves, larger features
+  float organicNoise(vec2 p) {
     float value = 0.0;
-    float amplitude = 0.5;
-    float frequency = 1.0;
-    for (int i = 0; i < 6; i++) {
-      value += amplitude * snoise(p * frequency);
-      amplitude *= 0.5;
-      frequency *= 2.0;
-    }
+    value += snoise(p * 0.5) * 0.6;
+    value += snoise(p * 1.0 + vec2(3.4, 1.2)) * 0.3;
+    value += snoise(p * 2.0 + vec2(7.1, 4.5)) * 0.1;
     return value;
   }
   
-  vec3 getFluidColor(vec2 uv, float time) {
-    // Create flowing, turbulent base
-    vec2 flow = vec2(
-      fbm(uv * 1.6 + time * 0.16),
-      fbm(uv * 1.6 + vec2(5.2, 1.3) + time * 0.13)
-    );
+  // Background color - smooth organic gradients like light through colored glass
+  vec3 getBackgroundColor(vec2 uv, float time) {
+    // Very slow, smooth flow
+    float slowTime = time * 0.08;
     
-    vec2 distortedUv = uv + flow * 0.5;
+    // Large organic shapes
+    float n1 = organicNoise(uv * 0.8 + slowTime * 0.5);
+    float n2 = organicNoise(uv * 0.6 + vec2(5.2, 3.1) - slowTime * 0.3);
+    float n3 = organicNoise(uv * 1.0 + vec2(2.7, 8.3) + slowTime * 0.4);
     
-    // Multiple layers of noise
-    float n1 = fbm(distortedUv * 1.4 + time * 0.085);
-    float n2 = fbm(distortedUv * 2.0 - time * 0.1 + vec2(3.1, 7.2));
-    float n3 = fbm(distortedUv * 0.9 + time * 0.065 + vec2(1.7, 9.3));
-    float n4 = fbm(distortedUv * 2.5 + time * 0.045 + vec2(8.4, 2.1));
-    
-    // Color palette matching the reference
-    vec3 white = vec3(1.0, 1.0, 1.0);
-    vec3 paleBlue = vec3(0.9, 0.96, 1.0);
-    vec3 brightCyan = vec3(0.3, 0.95, 1.0);
-    vec3 cyan = vec3(0.1, 0.8, 0.95);
-    vec3 skyBlue = vec3(0.45, 0.75, 1.0);
-    vec3 blue = vec3(0.15, 0.4, 0.95);
-    vec3 deepBlue = vec3(0.05, 0.15, 0.55);
-    vec3 orange = vec3(1.0, 0.55, 0.1);
-    vec3 brightOrange = vec3(1.0, 0.7, 0.25);
-    vec3 red = vec3(0.95, 0.15, 0.1);
-    vec3 pink = vec3(0.95, 0.45, 0.7);
-    vec3 black = vec3(0.0, 0.0, 0.03);
-    
-    // Normalize noise
+    // Normalize to 0-1
     float t1 = n1 * 0.5 + 0.5;
     float t2 = n2 * 0.5 + 0.5;
     float t3 = n3 * 0.5 + 0.5;
-    float t4 = n4 * 0.5 + 0.5;
     
+    // Color palette - vivid, saturated colors like the reference
+    vec3 white = vec3(1.0, 1.0, 1.0);
+    vec3 paleBlue = vec3(0.85, 0.92, 1.0);
+    vec3 cyan = vec3(0.2, 0.85, 0.95);
+    vec3 brightCyan = vec3(0.4, 0.95, 1.0);
+    vec3 skyBlue = vec3(0.5, 0.78, 1.0);
+    vec3 blue = vec3(0.1, 0.35, 0.9);
+    vec3 deepBlue = vec3(0.02, 0.1, 0.45);
+    vec3 orange = vec3(1.0, 0.5, 0.05);
+    vec3 brightOrange = vec3(1.0, 0.65, 0.15);
+    vec3 yellow = vec3(1.0, 0.85, 0.3);
+    vec3 red = vec3(0.95, 0.12, 0.08);
+    vec3 pink = vec3(0.95, 0.5, 0.65);
+    vec3 magenta = vec3(0.85, 0.25, 0.6);
+    vec3 black = vec3(0.0, 0.0, 0.02);
+    
+    // Build color with smooth gradients - larger color regions
     vec3 col = deepBlue;
     
-    // Build cyan/blue base
-    col = mix(col, blue, smoothstep(0.12, 0.38, t1));
-    col = mix(col, cyan, smoothstep(0.28, 0.55, t1) * smoothstep(0.2, 0.6, t2));
-    col = mix(col, brightCyan, smoothstep(0.42, 0.68, t1) * smoothstep(0.35, 0.75, t3));
-    col = mix(col, skyBlue, smoothstep(0.32, 0.58, t2) * smoothstep(0.28, 0.52, t4) * 0.55);
+    // Blue/cyan base with smooth transitions
+    col = mix(col, blue, smoothstep(0.2, 0.5, t1));
+    col = mix(col, skyBlue, smoothstep(0.35, 0.65, t1) * smoothstep(0.3, 0.6, t2));
+    col = mix(col, cyan, smoothstep(0.5, 0.75, t1) * smoothstep(0.4, 0.7, t3));
+    col = mix(col, brightCyan, smoothstep(0.6, 0.85, t2) * smoothstep(0.5, 0.8, t1));
     
-    // White/bright areas
-    float whiteMask = smoothstep(0.52, 0.78, t1) * smoothstep(0.48, 0.82, t2);
-    col = mix(col, paleBlue, whiteMask * 0.85);
-    col = mix(col, white, whiteMask * smoothstep(0.62, 0.88, t3));
+    // Bright/white areas
+    float whiteMask = smoothstep(0.65, 0.9, t1) * smoothstep(0.55, 0.85, t2);
+    col = mix(col, paleBlue, whiteMask);
+    col = mix(col, white, whiteMask * smoothstep(0.7, 0.95, t3));
     
-    // Warm zones - more saturated and prominent
-    float warmBase = smoothstep(0.32, 0.58, t3) * smoothstep(0.28, 0.52, t4);
-    float warmMask = warmBase * (1.0 - smoothstep(0.48, 0.72, t1));
-    col = mix(col, brightOrange, warmMask * 0.85);
-    col = mix(col, orange, warmMask * smoothstep(0.38, 0.62, t2) * 0.9);
-    col = mix(col, red, smoothstep(0.48, 0.68, t4) * warmMask * 0.95);
+    // Warm color zones - distinct regions
+    float warmZone = smoothstep(0.4, 0.65, t3) * (1.0 - smoothstep(0.55, 0.8, t1));
+    col = mix(col, yellow, warmZone * 0.4);
+    col = mix(col, brightOrange, warmZone * smoothstep(0.35, 0.6, t2));
+    col = mix(col, orange, warmZone * smoothstep(0.45, 0.7, t2) * 0.9);
+    col = mix(col, red, warmZone * smoothstep(0.55, 0.8, t3) * 0.95);
     
-    // Pink accents
-    float pinkMask = smoothstep(0.38, 0.62, t2) * smoothstep(0.42, 0.68, t4);
-    pinkMask *= (1.0 - warmMask) * smoothstep(0.25, 0.45, t1);
-    col = mix(col, pink, pinkMask * 0.5);
+    // Pink/magenta accents
+    float pinkZone = smoothstep(0.45, 0.7, t2) * smoothstep(0.5, 0.75, t3);
+    pinkZone *= (1.0 - warmZone * 0.8) * (1.0 - whiteMask);
+    col = mix(col, pink, pinkZone * 0.5);
+    col = mix(col, magenta, pinkZone * smoothstep(0.55, 0.8, t1) * 0.4);
     
-    // Deep black areas for dramatic contrast
-    float blackMask = (1.0 - smoothstep(0.08, 0.28, t1)) * (1.0 - smoothstep(0.12, 0.32, t2));
-    col = mix(col, black, blackMask * 0.92);
+    // Dark/black regions for contrast
+    float darkMask = (1.0 - smoothstep(0.15, 0.4, t1)) * (1.0 - smoothstep(0.2, 0.45, t2));
+    col = mix(col, black, darkMask * 0.95);
     
-    // Additional dark regions
-    float darkMask = smoothstep(0.18, 0.38, t3) * (1.0 - smoothstep(0.22, 0.45, t1)) * (1.0 - blackMask);
-    col = mix(col, deepBlue * 0.5, darkMask * 0.6);
-    
-    // Boost saturation significantly
+    // Boost saturation
     float lum = dot(col, vec3(0.299, 0.587, 0.114));
-    col = mix(vec3(lum), col, 1.4);
+    col = mix(vec3(lum), col, 1.5);
     
     return col;
   }
@@ -148,80 +139,107 @@ const fragmentShaderSource = `
     float localX = fract(uv.x * cols);
     float localY = fract(uv.y * rows);
     
-    // Bar mask
-    float gapX = 0.01;
-    float gapY = 0.005;
-    float barMask = step(gapX, localX) * step(localX, 1.0 - gapX);
-    barMask *= step(gapY, localY) * step(localY, 1.0 - gapY);
+    // No gaps - bars are flush, separation comes from edge highlights
+    float barX = localX;
+    float barY = localY;
     
-    // 3D glass effects - more pronounced
-    // Left edge bright line
-    float leftLine = smoothstep(0.0, 0.025, localX) * (1.0 - smoothstep(0.025, 0.06, localX));
-    float leftGlow = pow(smoothstep(0.08, 0.0, localX), 1.8);
+    // Glass thickness simulation - parabolic refraction like a cylinder lens
+    float centerDist = (barX - 0.5) * 2.0; // -1 to 1
+    float glassProfile = 1.0 - centerDist * centerDist; // Parabolic thickness
     
-    // Right edge
-    float rightLine = smoothstep(0.0, 0.02, 1.0 - localX) * (1.0 - smoothstep(0.02, 0.045, 1.0 - localX));
+    // Refraction offset - stronger horizontal compression/stretching
+    float refractionIndex = 1.5; // Glass IOR
+    float refractionStrength = 0.06;
+    vec2 refractOffset = vec2(
+      centerDist * refractionStrength * glassProfile,
+      0.0
+    );
     
-    // Edge darkening
-    float edgeDarken = smoothstep(0.0, 0.08, localX) * smoothstep(0.0, 0.08, 1.0 - localX);
+    // Vertical compression within bar - creates horizontal banding effect
+    float verticalRefract = sin(centerDist * 3.14159) * 0.015;
+    refractOffset.y += verticalRefract;
     
-    // Refraction
-    float refractionStrength = 0.04;
-    float distFromCenter = (localX - 0.5) * 2.0;
+    // Base UV for sampling background
+    vec2 sampleUv = uv + refractOffset;
     
-    vec2 refractedUv = uv;
-    refractedUv.x += distFromCenter * refractionStrength;
-    refractedUv.y += sin(distFromCenter * 3.14159) * refractionStrength * 0.3;
+    // Per-bar slight rotation/offset for organic feel
+    float barSeed = colIndex * 0.73 + rowIndex * 1.37;
+    float barPhase = sin(barSeed + u_time * 0.15) * 0.008;
+    sampleUv.y += barPhase;
+    sampleUv.x += cos(barSeed * 0.8 + u_time * 0.1) * 0.005;
     
-    // Per-bar variation
-    float phase = sin(colIndex * 0.85 + rowIndex * 1.6 + u_time * 0.22) * 0.015;
-    refractedUv.y += phase;
-    refractedUv.x += cos(colIndex * 0.55 + u_time * 0.15) * 0.01;
+    // Sample background with chromatic aberration
+    float chromaStrength = 0.008 * (1.0 + abs(centerDist));
+    vec3 col;
+    col.r = getBackgroundColor((sampleUv + vec2(chromaStrength, 0.0)) * vec2(aspect * 0.55, 1.0), u_time).r;
+    col.g = getBackgroundColor(sampleUv * vec2(aspect * 0.55, 1.0), u_time).g;
+    col.b = getBackgroundColor((sampleUv - vec2(chromaStrength, 0.0)) * vec2(aspect * 0.55, 1.0), u_time).b;
     
-    // Get colors
-    vec3 fluidColor = getFluidColor(refractedUv * vec2(aspect * 0.6, 1.0), u_time);
+    // === GLASS EDGE EFFECTS - THICKNESS AND DEPTH ===
     
-    // Chromatic aberration
-    float chromaStrength = 0.012;
-    vec2 chromaOffset = vec2(distFromCenter * chromaStrength, 0.0);
+    // Left edge - bright beveled highlight (light catching the glass edge)
+    float leftEdge1 = smoothstep(0.0, 0.02, barX) * (1.0 - smoothstep(0.02, 0.05, barX));
+    float leftEdge2 = smoothstep(0.0, 0.05, barX) * (1.0 - smoothstep(0.05, 0.12, barX));
+    float leftGlow = pow(1.0 - smoothstep(0.0, 0.15, barX), 2.0);
     
-    vec3 chromaColor;
-    chromaColor.r = getFluidColor((refractedUv + chromaOffset) * vec2(aspect * 0.6, 1.0), u_time).r;
-    chromaColor.g = fluidColor.g;
-    chromaColor.b = getFluidColor((refractedUv - chromaOffset) * vec2(aspect * 0.6, 1.0), u_time).b;
+    // Right edge - subtle secondary highlight and shadow
+    float rightEdge1 = smoothstep(0.0, 0.015, 1.0 - barX) * (1.0 - smoothstep(0.015, 0.035, 1.0 - barX));
+    float rightEdge2 = smoothstep(0.0, 0.04, 1.0 - barX) * (1.0 - smoothstep(0.04, 0.1, 1.0 - barX));
+    float rightDark = pow(1.0 - smoothstep(0.0, 0.08, 1.0 - barX), 1.5);
     
-    vec3 col = mix(fluidColor, chromaColor, 0.4);
+    // Top and bottom edges - horizontal thickness lines
+    float topEdge = smoothstep(0.0, 0.025, 1.0 - barY) * (1.0 - smoothstep(0.025, 0.06, 1.0 - barY));
+    float bottomEdge = smoothstep(0.0, 0.02, barY) * (1.0 - smoothstep(0.02, 0.05, barY));
     
-    // Apply edge effects
-    col *= mix(0.65, 1.0, edgeDarken);
+    // Corner highlights - where edges meet
+    float cornerTL = leftEdge2 * topEdge * 2.0;
+    float cornerBL = leftEdge2 * bottomEdge * 1.5;
     
-    // Strong left edge highlight
-    col += vec3(0.95, 0.98, 1.0) * leftLine * 0.8;
-    col += vec3(0.85, 0.92, 1.0) * leftGlow * 0.45;
+    // Overall edge darkening (glass is thicker at edges when viewed through)
+    float edgeDarken = smoothstep(0.0, 0.1, barX) * smoothstep(0.0, 0.1, 1.0 - barX);
+    edgeDarken *= smoothstep(0.0, 0.06, barY) * smoothstep(0.0, 0.06, 1.0 - barY);
     
-    // Subtle right edge
-    col += vec3(0.75, 0.85, 0.95) * rightLine * 0.35;
+    // Apply glass thickness - darken edges slightly
+    col *= mix(0.7, 1.0, edgeDarken);
     
-    // Sharp specular
-    float specLeft = pow(max(0.0, 1.0 - localX / 0.015), 6.0);
-    col += vec3(1.0) * specLeft * 0.6;
+    // Fresnel-like edge brightening (light scattering in glass)
+    float fresnel = pow(1.0 - edgeDarken, 0.8) * 0.15;
+    col += vec3(0.8, 0.9, 1.0) * fresnel;
     
-    // Horizontal separations
-    float horizEdge = smoothstep(0.0, 0.015, localY) * smoothstep(0.0, 0.015, 1.0 - localY);
-    col *= mix(0.5, 1.0, horizEdge);
+    // Left edge highlights - primary light source
+    col += vec3(1.0, 1.0, 1.0) * leftEdge1 * 0.95;
+    col += vec3(0.9, 0.95, 1.0) * leftEdge2 * 0.4;
+    col += vec3(0.85, 0.92, 1.0) * leftGlow * 0.25;
     
-    // Top highlight
-    float topHighlight = (1.0 - smoothstep(0.0, 0.03, 1.0 - localY));
-    topHighlight *= smoothstep(0.012, 0.04, localX) * smoothstep(0.012, 0.04, 1.0 - localX);
-    col += vec3(0.9, 0.95, 1.0) * topHighlight * 0.2;
+    // Right edge - darker with subtle highlight
+    col *= mix(1.0, 0.85, rightDark * 0.5);
+    col += vec3(0.7, 0.8, 0.9) * rightEdge1 * 0.3;
+    col += vec3(0.6, 0.7, 0.85) * rightEdge2 * 0.15;
     
-    // Gap color
-    vec3 gapColor = vec3(0.01, 0.015, 0.03);
+    // Horizontal edge highlights
+    col += vec3(0.9, 0.95, 1.0) * topEdge * 0.35;
+    col += vec3(0.85, 0.9, 0.95) * bottomEdge * 0.25;
+    
+    // Corner accents
+    col += vec3(1.0) * cornerTL * 0.3;
+    col += vec3(0.95, 0.98, 1.0) * cornerBL * 0.2;
+    
+    // Sharp specular highlight on left edge
+    float specular = pow(max(0.0, 1.0 - barX / 0.012), 8.0);
+    col += vec3(1.0) * specular * 0.7;
+    
+    // Subtle internal reflection/caustic
+    float caustic = sin(barX * 12.0 + barY * 3.0 + u_time * 0.5) * 0.5 + 0.5;
+    caustic *= glassProfile * 0.03;
+    col += vec3(0.95, 0.98, 1.0) * caustic;
+    
+    // Gap between bars - dark
+    vec3 gapColor = vec3(0.008, 0.012, 0.025);
     col = mix(gapColor, col, barMask);
     
-    // Vignette
+    // Very subtle vignette
     vec2 vignetteUv = uv - 0.5;
-    float vignette = 1.0 - dot(vignetteUv, vignetteUv) * 0.1;
+    float vignette = 1.0 - dot(vignetteUv, vignetteUv) * 0.08;
     col *= vignette;
     
     gl_FragColor = vec4(col, 1.0);
