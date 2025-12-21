@@ -16,22 +16,38 @@ interface ShaderParams {
   glassEdgeIntensity: number;
   causticIntensity: number;
   vignetteStrength: number;
+  edgeHardness: number;
+  shimmerIntensity: number;
+  // New edge controls
+  edgeWidth: number;
+  edgeWarmth: number;
+  edgeRefraction: number;
+  edgeBevelDepth: number;
+  edgeChroma: number;
 }
 
 const defaultParams: ShaderParams = {
   cols: 35,
   rows: 9,
-  gapX: 0.012,
-  gapY: 0.008,
-  refractionStrength: 0.06,
-  chromaStrength: 0.008,
-  speed: 1.0,
-  noiseScale: 1.0,
-  saturation: 1.5,
-  brightness: 1.0,
-  glassEdgeIntensity: 1.0,
-  causticIntensity: 1.0,
-  vignetteStrength: 0.08,
+  gapX: 0.008,
+  gapY: 0.006,
+  refractionStrength: 0.08,
+  chromaStrength: 0.025,
+  speed: 0.15,
+  noiseScale: 0.8,
+  saturation: 1.6,
+  brightness: 1.1,
+  glassEdgeIntensity: 1.8,
+  causticIntensity: 0.2,
+  vignetteStrength: 0.05,
+  edgeHardness: 0.85,
+  shimmerIntensity: 0.5,
+  // New edge defaults - tuned to match reference
+  edgeWidth: 0.04,
+  edgeWarmth: 0.8,
+  edgeRefraction: 0.6,
+  edgeBevelDepth: 0.7,
+  edgeChroma: 0.5,
 };
 
 const vertexShaderSource = `
@@ -59,6 +75,13 @@ const createFragmentShaderSource = () => `
   uniform float u_glassEdgeIntensity;
   uniform float u_causticIntensity;
   uniform float u_vignetteStrength;
+  uniform float u_edgeHardness;
+  uniform float u_shimmerIntensity;
+  uniform float u_edgeWidth;
+  uniform float u_edgeWarmth;
+  uniform float u_edgeRefraction;
+  uniform float u_edgeBevelDepth;
+  uniform float u_edgeChroma;
   
   // Simplex noise functions
   vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -92,76 +115,105 @@ const createFragmentShaderSource = () => `
     return 130.0 * dot(m, g);
   }
   
-  // Smooth organic noise - less octaves, larger features
-  float organicNoise(vec2 p) {
-    float value = 0.0;
-    value += snoise(p * 0.5) * 0.6;
-    value += snoise(p * 1.0 + vec2(3.4, 1.2)) * 0.3;
-    value += snoise(p * 2.0 + vec2(7.1, 4.5)) * 0.1;
-    return value;
+  // Static pattern noise - creates hard-edged color regions
+  float staticNoise(vec2 p, float time, float shimmerAmt) {
+    // Very slow shimmer, not flow
+    float shimmer = sin(time * 0.5) * 0.02 * shimmerAmt;
+    float n = snoise(p + shimmer);
+    return n;
   }
   
-  // Background color - smooth organic gradients like light through colored glass
+  // Hard-edged step function for crisp color transitions
+  float hardStep(float edge, float x, float softness) {
+    return smoothstep(edge - softness, edge + softness, x);
+  }
+  
+  // Background color - static regions with hard edges and shimmer
   vec3 getBackgroundColor(vec2 uv, float time) {
-    // Very slow, smooth flow
-    float slowTime = time * 0.08 * u_speed;
+    // Slow shimmer animation (not flowing)
+    float shimmerTime = time * u_speed;
+    float shimmerAmt = u_shimmerIntensity;
     
-    // Large organic shapes
-    float n1 = organicNoise(uv * 0.8 * u_noiseScale + slowTime * 0.5);
-    float n2 = organicNoise(uv * 0.6 * u_noiseScale + vec2(5.2, 3.1) - slowTime * 0.3);
-    float n3 = organicNoise(uv * 1.0 * u_noiseScale + vec2(2.7, 8.3) + slowTime * 0.4);
+    // Multiple noise layers at different scales - mostly static
+    float n1 = staticNoise(uv * 1.2 * u_noiseScale, shimmerTime, shimmerAmt);
+    float n2 = staticNoise(uv * 0.8 * u_noiseScale + vec2(5.2, 3.1), shimmerTime * 0.7, shimmerAmt);
+    float n3 = staticNoise(uv * 1.5 * u_noiseScale + vec2(2.7, 8.3), shimmerTime * 0.5, shimmerAmt);
+    float n4 = staticNoise(uv * 0.6 * u_noiseScale + vec2(9.1, 1.7), shimmerTime * 0.3, shimmerAmt);
     
     // Normalize to 0-1
     float t1 = n1 * 0.5 + 0.5;
     float t2 = n2 * 0.5 + 0.5;
     float t3 = n3 * 0.5 + 0.5;
+    float t4 = n4 * 0.5 + 0.5;
     
-    // Color palette - vivid, saturated colors like the reference
+    // Color palette - vibrant colors from reference
     vec3 white = vec3(1.0, 1.0, 1.0);
-    vec3 paleBlue = vec3(0.85, 0.92, 1.0);
-    vec3 cyan = vec3(0.2, 0.85, 0.95);
-    vec3 brightCyan = vec3(0.4, 0.95, 1.0);
-    vec3 skyBlue = vec3(0.5, 0.78, 1.0);
-    vec3 blue = vec3(0.1, 0.35, 0.9);
-    vec3 deepBlue = vec3(0.02, 0.1, 0.45);
-    vec3 orange = vec3(1.0, 0.5, 0.05);
-    vec3 brightOrange = vec3(1.0, 0.65, 0.15);
-    vec3 yellow = vec3(1.0, 0.85, 0.3);
-    vec3 red = vec3(0.95, 0.12, 0.08);
-    vec3 pink = vec3(0.95, 0.5, 0.65);
-    vec3 magenta = vec3(0.85, 0.25, 0.6);
-    vec3 black = vec3(0.0, 0.0, 0.02);
+    vec3 paleBlue = vec3(0.88, 0.94, 1.0);
+    vec3 cyan = vec3(0.15, 0.85, 0.98);
+    vec3 brightCyan = vec3(0.45, 0.95, 1.0);
+    vec3 skyBlue = vec3(0.45, 0.75, 1.0);
+    vec3 blue = vec3(0.08, 0.3, 0.92);
+    vec3 deepBlue = vec3(0.02, 0.08, 0.5);
+    vec3 orange = vec3(1.0, 0.45, 0.0);
+    vec3 brightOrange = vec3(1.0, 0.6, 0.1);
+    vec3 yellow = vec3(1.0, 0.9, 0.35);
+    vec3 red = vec3(0.98, 0.08, 0.05);
+    vec3 pink = vec3(0.98, 0.55, 0.7);
+    vec3 magenta = vec3(0.9, 0.2, 0.65);
+    vec3 black = vec3(0.0, 0.0, 0.0);
     
-    // Build color with smooth gradients - larger color regions
-    vec3 col = deepBlue;
+    // Hard edge transition threshold - controlled by edgeHardness
+    // Higher hardness = smaller edgeSoft = sharper transitions
+    float edgeSoft = 0.15 * (1.0 - u_edgeHardness * 0.9);
     
-    // Blue/cyan base with smooth transitions
-    col = mix(col, blue, smoothstep(0.2, 0.5, t1));
-    col = mix(col, skyBlue, smoothstep(0.35, 0.65, t1) * smoothstep(0.3, 0.6, t2));
-    col = mix(col, cyan, smoothstep(0.5, 0.75, t1) * smoothstep(0.4, 0.7, t3));
-    col = mix(col, brightCyan, smoothstep(0.6, 0.85, t2) * smoothstep(0.5, 0.8, t1));
+    // Base - deep blue/black with hard transitions
+    vec3 col = black;
     
-    // Bright/white areas
-    float whiteMask = smoothstep(0.65, 0.9, t1) * smoothstep(0.55, 0.85, t2);
+    // Deep blue regions with hard edges
+    col = mix(col, deepBlue, hardStep(0.25, t1, edgeSoft));
+    
+    // Blue regions
+    col = mix(col, blue, hardStep(0.35, t1, edgeSoft) * hardStep(0.3, t2, edgeSoft));
+    
+    // Sky blue with harder edges
+    float skyMask = hardStep(0.45, t1, edgeSoft) * hardStep(0.4, t2, edgeSoft);
+    col = mix(col, skyBlue, skyMask);
+    
+    // Cyan areas - vibrant
+    float cyanMask = hardStep(0.55, t1, edgeSoft) * hardStep(0.5, t3, edgeSoft);
+    col = mix(col, cyan, cyanMask);
+    col = mix(col, brightCyan, hardStep(0.65, t2, edgeSoft) * cyanMask);
+    
+    // WHITE/BRIGHT REGIONS - key feature from reference
+    float whiteMask = hardStep(0.7, t1, 0.06) * hardStep(0.65, t2, 0.06);
+    whiteMask = max(whiteMask, hardStep(0.75, t4, 0.05) * hardStep(0.7, t3, 0.05));
     col = mix(col, paleBlue, whiteMask);
-    col = mix(col, white, whiteMask * smoothstep(0.7, 0.95, t3));
+    col = mix(col, white, whiteMask * hardStep(0.8, t3, 0.04));
     
-    // Warm color zones - distinct regions
-    float warmZone = smoothstep(0.4, 0.65, t3) * (1.0 - smoothstep(0.55, 0.8, t1));
-    col = mix(col, yellow, warmZone * 0.4);
-    col = mix(col, brightOrange, warmZone * smoothstep(0.35, 0.6, t2));
-    col = mix(col, orange, warmZone * smoothstep(0.45, 0.7, t2) * 0.9);
-    col = mix(col, red, warmZone * smoothstep(0.55, 0.8, t3) * 0.95);
+    // WARM COLOR ZONES - orange, red with hard edges
+    float warmBase = hardStep(0.4, t3, edgeSoft) * (1.0 - hardStep(0.6, t1, edgeSoft));
+    
+    // Yellow fringe
+    col = mix(col, yellow, warmBase * hardStep(0.35, t4, edgeSoft) * 0.6);
+    
+    // Orange core
+    float orangeMask = warmBase * hardStep(0.45, t2, edgeSoft);
+    col = mix(col, brightOrange, orangeMask);
+    col = mix(col, orange, orangeMask * hardStep(0.55, t4, edgeSoft));
+    
+    // Red hot spots
+    float redMask = warmBase * hardStep(0.6, t3, 0.05) * hardStep(0.55, t4, 0.05);
+    col = mix(col, red, redMask);
     
     // Pink/magenta accents
-    float pinkZone = smoothstep(0.45, 0.7, t2) * smoothstep(0.5, 0.75, t3);
-    pinkZone *= (1.0 - warmZone * 0.8) * (1.0 - whiteMask);
+    float pinkZone = hardStep(0.5, t2, edgeSoft) * hardStep(0.55, t3, edgeSoft);
+    pinkZone *= (1.0 - warmBase * 0.7) * (1.0 - whiteMask);
     col = mix(col, pink, pinkZone * 0.5);
-    col = mix(col, magenta, pinkZone * smoothstep(0.55, 0.8, t1) * 0.4);
+    col = mix(col, magenta, pinkZone * hardStep(0.65, t1, 0.06) * 0.6);
     
-    // Dark/black regions for contrast
-    float darkMask = (1.0 - smoothstep(0.15, 0.4, t1)) * (1.0 - smoothstep(0.2, 0.45, t2));
-    col = mix(col, black, darkMask * 0.95);
+    // Dark/black regions for high contrast
+    float darkMask = (1.0 - hardStep(0.2, t1, edgeSoft)) * (1.0 - hardStep(0.25, t2, edgeSoft));
+    col = mix(col, black, darkMask);
     
     // Boost saturation
     float lum = dot(col, vec3(0.299, 0.587, 0.114));
@@ -194,107 +246,181 @@ const createFragmentShaderSource = () => `
     barMask *= step(gapY, localY) * step(localY, 1.0 - gapY);
     
     // Glass prism refraction - cylindrical lens effect
-    // Normalize local position within bar (excluding gaps)
     float barX = (localX - gapX) / (1.0 - 2.0 * gapX);
     float barY = (localY - gapY) / (1.0 - 2.0 * gapY);
     barX = clamp(barX, 0.0, 1.0);
     barY = clamp(barY, 0.0, 1.0);
     
-    // Glass thickness simulation - parabolic refraction like a cylinder lens
+    // Glass thickness - stronger cylindrical lens
     float centerDist = (barX - 0.5) * 2.0; // -1 to 1
-    float glassProfile = 1.0 - centerDist * centerDist; // Parabolic thickness
+    float glassProfile = 1.0 - centerDist * centerDist;
     
-    // Refraction offset - stronger horizontal compression/stretching
+    // Refraction offset - static lens distortion
     float refractionStrength = u_refractionStrength;
     vec2 refractOffset = vec2(
       centerDist * refractionStrength * glassProfile,
       0.0
     );
     
-    // Vertical compression within bar - creates horizontal banding effect
-    float verticalRefract = sin(centerDist * 3.14159) * 0.015;
+    // Subtle vertical lens distortion
+    float verticalRefract = sin(centerDist * 3.14159) * 0.01;
     refractOffset.y += verticalRefract;
     
-    // Base UV for sampling background
+    // Base UV for sampling background - static per bar
     vec2 sampleUv = uv + refractOffset;
     
-    // Per-bar slight rotation/offset for organic feel
+    // Per-bar unique offset (static, not animated)
     float barSeed = colIndex * 0.73 + rowIndex * 1.37;
-    float barPhase = sin(barSeed + u_time * 0.15 * u_speed) * 0.008;
-    sampleUv.y += barPhase;
-    sampleUv.x += cos(barSeed * 0.8 + u_time * 0.1 * u_speed) * 0.005;
+    float barOffsetX = sin(barSeed) * 0.012;
+    float barOffsetY = cos(barSeed * 1.3) * 0.008;
+    sampleUv.x += barOffsetX;
+    sampleUv.y += barOffsetY;
     
-    // Sample background with chromatic aberration
-    float chromaStrength = u_chromaStrength * (1.0 + abs(centerDist));
+    // Very subtle shimmer animation (discrete, not flowing)
+    float shimmer = sin(barSeed * 2.1 + u_time * 0.3 * u_speed) * 0.003 * u_shimmerIntensity;
+    sampleUv.x += shimmer;
+    
+    // STRONG CHROMATIC ABERRATION - key feature from reference
+    float chromaBase = u_chromaStrength;
+    // Chromatic aberration increases toward edges of each bar
+    float chromaEdge = chromaBase * (1.0 + abs(centerDist) * 2.0);
+    
     vec3 col;
-    col.r = getBackgroundColor((sampleUv + vec2(chromaStrength, 0.0)) * vec2(aspect * 0.55, 1.0), u_time).r;
-    col.g = getBackgroundColor(sampleUv * vec2(aspect * 0.55, 1.0), u_time).g;
-    col.b = getBackgroundColor((sampleUv - vec2(chromaStrength, 0.0)) * vec2(aspect * 0.55, 1.0), u_time).b;
+    // Red channel - shifted right/positive
+    vec2 redUv = sampleUv + vec2(chromaEdge, chromaEdge * 0.3);
+    col.r = getBackgroundColor(redUv * vec2(aspect * 0.5, 1.0), u_time).r;
     
-    // === GLASS EDGE EFFECTS - THICKNESS AND DEPTH ===
+    // Green channel - center
+    col.g = getBackgroundColor(sampleUv * vec2(aspect * 0.5, 1.0), u_time).g;
+    
+    // Blue channel - shifted left/negative
+    vec2 blueUv = sampleUv - vec2(chromaEdge, chromaEdge * 0.2);
+    col.b = getBackgroundColor(blueUv * vec2(aspect * 0.5, 1.0), u_time).b;
+    
+    // === ADVANCED GLASS EDGE EFFECTS ===
     float edgeIntensity = u_glassEdgeIntensity;
+    float edgeW = u_edgeWidth;
+    float warmth = u_edgeWarmth;
+    float edgeRefract = u_edgeRefraction;
+    float bevelDepth = u_edgeBevelDepth;
+    float edgeChromaAmt = u_edgeChroma;
     
-    // Left edge - bright beveled highlight (light catching the glass edge)
-    float leftEdge1 = smoothstep(0.0, 0.02, barX) * (1.0 - smoothstep(0.02, 0.05, barX));
-    float leftEdge2 = smoothstep(0.0, 0.05, barX) * (1.0 - smoothstep(0.05, 0.12, barX));
-    float leftGlow = pow(1.0 - smoothstep(0.0, 0.15, barX), 2.0);
+    // Edge colors - warm amber/orange on one side, cool blue on other
+    vec3 warmOrange = vec3(1.0, 0.55, 0.15);
+    vec3 amber = vec3(1.0, 0.7, 0.3);
+    vec3 warmHighlight = mix(vec3(1.0, 1.0, 1.0), warmOrange, warmth);
+    vec3 coolHighlight = vec3(0.85, 0.92, 1.0);
+    vec3 whiteHighlight = vec3(1.0, 1.0, 1.0);
     
-    // Right edge - subtle secondary highlight and shadow
-    float rightEdge1 = smoothstep(0.0, 0.015, 1.0 - barX) * (1.0 - smoothstep(0.015, 0.035, 1.0 - barX));
-    float rightEdge2 = smoothstep(0.0, 0.04, 1.0 - barX) * (1.0 - smoothstep(0.04, 0.1, 1.0 - barX));
-    float rightDark = pow(1.0 - smoothstep(0.0, 0.08, 1.0 - barX), 1.5);
+    // Edge distances
+    float leftDist = barX;
+    float rightDist = 1.0 - barX;
+    float topDist = 1.0 - barY;
+    float bottomDist = barY;
     
-    // Top and bottom edges - horizontal thickness lines
-    float topEdge = smoothstep(0.0, 0.025, 1.0 - barY) * (1.0 - smoothstep(0.025, 0.06, 1.0 - barY));
-    float bottomEdge = smoothstep(0.0, 0.02, barY) * (1.0 - smoothstep(0.02, 0.05, barY));
+    // === PRIMARY EDGE LINES (warm amber on left/bottom edges) ===
+    float edgeSoftness = 0.006;
+    float innerBevelStart = edgeW;
+    float innerBevelEnd = edgeW * 3.0;
     
-    // Corner highlights - where edges meet
-    float cornerTL = leftEdge2 * topEdge * 2.0;
-    float cornerBL = leftEdge2 * bottomEdge * 1.5;
+    // LEFT EDGE - Primary warm orange line (like in reference)
+    float leftPrimaryLine = smoothstep(0.0, edgeSoftness, leftDist);
+    leftPrimaryLine *= (1.0 - smoothstep(edgeW * 0.6, edgeW, leftDist));
     
-    // Overall edge darkening (glass is thicker at edges when viewed through)
-    float edgeDarken = smoothstep(0.0, 0.1, barX) * smoothstep(0.0, 0.1, 1.0 - barX);
-    edgeDarken *= smoothstep(0.0, 0.06, barY) * smoothstep(0.0, 0.06, 1.0 - barY);
+    // Left edge inner gradient (beveled glass depth)
+    float leftBevelGrad = smoothstep(0.0, innerBevelEnd, leftDist);
+    float leftInnerZone = smoothstep(edgeW * 0.5, innerBevelStart, leftDist) * (1.0 - smoothstep(innerBevelStart, innerBevelEnd, leftDist));
     
-    // Apply glass thickness - darken edges slightly
-    col *= mix(0.7, 1.0, edgeDarken);
+    // RIGHT EDGE - Cool blue/white highlight
+    float rightPrimaryLine = smoothstep(0.0, edgeSoftness, rightDist);
+    rightPrimaryLine *= (1.0 - smoothstep(edgeW * 0.5, edgeW * 0.8, rightDist));
     
-    // Fresnel-like edge brightening (light scattering in glass)
-    float fresnel = pow(1.0 - edgeDarken, 0.8) * 0.15 * edgeIntensity;
-    col += vec3(0.8, 0.9, 1.0) * fresnel;
+    // Right edge bevel
+    float rightInnerZone = smoothstep(edgeW * 0.4, edgeW * 0.8, rightDist) * (1.0 - smoothstep(edgeW * 0.8, innerBevelEnd * 0.7, rightDist));
     
-    // Left edge highlights - primary light source
-    col += vec3(1.0, 1.0, 1.0) * leftEdge1 * 0.95 * edgeIntensity;
-    col += vec3(0.9, 0.95, 1.0) * leftEdge2 * 0.4 * edgeIntensity;
-    col += vec3(0.85, 0.92, 1.0) * leftGlow * 0.25 * edgeIntensity;
+    // TOP EDGE
+    float topLine = smoothstep(0.0, edgeSoftness * 1.5, topDist);
+    topLine *= (1.0 - smoothstep(edgeW * 0.8, edgeW * 1.2, topDist));
     
-    // Right edge - darker with subtle highlight
-    col *= mix(1.0, 0.85, rightDark * 0.5 * edgeIntensity);
-    col += vec3(0.7, 0.8, 0.9) * rightEdge1 * 0.3 * edgeIntensity;
-    col += vec3(0.6, 0.7, 0.85) * rightEdge2 * 0.15 * edgeIntensity;
+    // BOTTOM EDGE - Warm amber
+    float bottomLine = smoothstep(0.0, edgeSoftness * 1.5, bottomDist);
+    bottomLine *= (1.0 - smoothstep(edgeW * 0.8, edgeW * 1.2, bottomDist));
     
-    // Horizontal edge highlights
-    col += vec3(0.9, 0.95, 1.0) * topEdge * 0.35 * edgeIntensity;
-    col += vec3(0.85, 0.9, 0.95) * bottomEdge * 0.25 * edgeIntensity;
+    // === CHROMATIC EDGE REFRACTION ===
+    // Create color splitting at edges like real glass refraction
+    float leftEdgeZone = 1.0 - smoothstep(0.0, innerBevelEnd * 1.5, leftDist);
+    float rightEdgeZone = 1.0 - smoothstep(0.0, innerBevelEnd * 1.2, rightDist);
     
-    // Corner accents
-    col += vec3(1.0) * cornerTL * 0.3 * edgeIntensity;
-    col += vec3(0.95, 0.98, 1.0) * cornerBL * 0.2 * edgeIntensity;
+    // Shift red channel outward at left edge, blue at right edge
+    float edgeChromaShift = edgeChromaAmt * 0.15;
+    vec2 leftChromaOffset = vec2(-edgeChromaShift * leftEdgeZone, 0.0);
+    vec2 rightChromaOffset = vec2(edgeChromaShift * rightEdgeZone, 0.0);
     
-    // Sharp specular highlight on left edge
-    float specular = pow(max(0.0, 1.0 - barX / 0.012), 8.0);
-    col += vec3(1.0) * specular * 0.7 * edgeIntensity;
+    // Sample with chromatic offset at edges
+    vec3 leftEdgeColor = vec3(0.0);
+    leftEdgeColor.r = getBackgroundColor((sampleUv + leftChromaOffset + vec2(edgeRefract * 0.02 * leftEdgeZone, 0.0)) * vec2(aspect * 0.5, 1.0), u_time).r;
+    leftEdgeColor.g = getBackgroundColor((sampleUv + leftChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time).g;
+    leftEdgeColor.b = getBackgroundColor((sampleUv - leftChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time).b;
     
-    // Subtle internal reflection/caustic
-    float caustic = sin(barX * 12.0 + barY * 3.0 + u_time * 0.5 * u_speed) * 0.5 + 0.5;
-    caustic *= glassProfile * 0.03 * u_causticIntensity;
-    col += vec3(0.95, 0.98, 1.0) * caustic;
+    vec3 rightEdgeColor = vec3(0.0);
+    rightEdgeColor.r = getBackgroundColor((sampleUv + rightChromaOffset * 0.3) * vec2(aspect * 0.5, 1.0), u_time).r;
+    rightEdgeColor.g = getBackgroundColor((sampleUv + rightChromaOffset * 0.5) * vec2(aspect * 0.5, 1.0), u_time).g;
+    rightEdgeColor.b = getBackgroundColor((sampleUv + rightChromaOffset - vec2(edgeRefract * 0.015 * rightEdgeZone, 0.0)) * vec2(aspect * 0.5, 1.0), u_time).b;
     
-    // Gap between bars - dark
-    vec3 gapColor = vec3(0.008, 0.012, 0.025);
+    // Blend edge refracted colors
+    col = mix(col, leftEdgeColor, leftEdgeZone * edgeRefract * 0.5);
+    col = mix(col, rightEdgeColor, rightEdgeZone * edgeRefract * 0.4);
+    
+    // === APPLY EDGE HIGHLIGHTS ===
+    // Left edge - warm orange/amber primary line
+    col = mix(col, warmHighlight, leftPrimaryLine * 0.85 * edgeIntensity);
+    col += amber * leftInnerZone * 0.25 * edgeIntensity * warmth;
+    
+    // Right edge - cool blue/white
+    col = mix(col, coolHighlight, rightPrimaryLine * 0.5 * edgeIntensity);
+    col += coolHighlight * rightInnerZone * 0.15 * edgeIntensity;
+    
+    // Top edge - subtle cool
+    col += mix(coolHighlight, whiteHighlight, 0.5) * topLine * 0.35 * edgeIntensity;
+    
+    // Bottom edge - warm amber
+    col += mix(warmHighlight, amber, 0.4) * bottomLine * 0.4 * edgeIntensity;
+    
+    // === BEVEL DEPTH SHADING ===
+    // Darken inner bevel zone to create depth illusion
+    float leftBevelShadow = smoothstep(edgeW, edgeW * 2.5, leftDist) * (1.0 - smoothstep(edgeW * 2.5, edgeW * 5.0, leftDist));
+    float rightBevelShadow = smoothstep(edgeW * 0.8, edgeW * 2.0, rightDist) * (1.0 - smoothstep(edgeW * 2.0, edgeW * 4.0, rightDist));
+    
+    col *= mix(1.0, 0.88, leftBevelShadow * bevelDepth * 0.5);
+    col *= mix(1.0, 0.92, rightBevelShadow * bevelDepth * 0.35);
+    
+    // === CORNER ACCENTS ===
+    // Warm corners where edges meet
+    float cornerBL = pow((1.0 - smoothstep(0.0, 0.12, leftDist)) * (1.0 - smoothstep(0.0, 0.12, bottomDist)), 0.7);
+    float cornerTL = pow((1.0 - smoothstep(0.0, 0.12, leftDist)) * (1.0 - smoothstep(0.0, 0.12, topDist)), 0.7);
+    float cornerBR = pow((1.0 - smoothstep(0.0, 0.1, rightDist)) * (1.0 - smoothstep(0.0, 0.1, bottomDist)), 0.7);
+    float cornerTR = pow((1.0 - smoothstep(0.0, 0.1, rightDist)) * (1.0 - smoothstep(0.0, 0.1, topDist)), 0.7);
+    
+    // Warm corners (especially bottom-left and top-left like reference)
+    col += warmOrange * cornerBL * 0.35 * edgeIntensity * warmth;
+    col += amber * cornerTL * 0.25 * edgeIntensity * warmth;
+    col += coolHighlight * cornerBR * 0.15 * edgeIntensity;
+    col += coolHighlight * cornerTR * 0.12 * edgeIntensity;
+    
+    // === GLASS CENTER SPECULAR ===
+    float specular = pow(glassProfile, 2.5) * 0.06 * edgeIntensity;
+    col += whiteHighlight * specular;
+    
+    // === CAUSTIC SHIMMER ===
+    float caustic = sin(barX * 15.0 + barY * 5.0 + u_time * 0.4 * u_speed) * 0.5 + 0.5;
+    caustic = pow(caustic, 2.5) * glassProfile * 0.025 * u_causticIntensity;
+    col += whiteHighlight * caustic;
+    
+    // Gap between bars - very dark
+    vec3 gapColor = vec3(0.005, 0.008, 0.02);
     col = mix(gapColor, col, barMask);
     
-    // Very subtle vignette
+    // Subtle vignette
     vec2 vignetteUv = uv - 0.5;
     float vignette = 1.0 - dot(vignetteUv, vignetteUv) * u_vignetteStrength;
     col *= vignette;
@@ -307,9 +433,10 @@ interface ControlPanelProps {
   params: ShaderParams;
   onChange: (params: ShaderParams) => void;
   onReset: () => void;
+  onSave: () => void;
 }
 
-function ControlPanel({ params, onChange, onReset }: ControlPanelProps) {
+function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const handleChange = (key: keyof ShaderParams, value: number) => {
@@ -334,8 +461,15 @@ function ControlPanel({ params, onChange, onReset }: ControlPanelProps) {
     { key: "saturation", label: "Saturation", min: 0, max: 3, step: 0.1 },
     { key: "brightness", label: "Brightness", min: 0.1, max: 2, step: 0.05 },
     { key: "glassEdgeIntensity", label: "Glass Edge Intensity", min: 0, max: 2, step: 0.1 },
+    { key: "edgeWidth", label: "Edge Width", min: 0.01, max: 0.1, step: 0.005 },
+    { key: "edgeWarmth", label: "Edge Warmth", min: 0, max: 1, step: 0.05 },
+    { key: "edgeRefraction", label: "Edge Refraction", min: 0, max: 1, step: 0.05 },
+    { key: "edgeBevelDepth", label: "Edge Bevel Depth", min: 0, max: 1, step: 0.05 },
+    { key: "edgeChroma", label: "Edge Chroma Split", min: 0, max: 1, step: 0.05 },
     { key: "causticIntensity", label: "Caustic Intensity", min: 0, max: 3, step: 0.1 },
     { key: "vignetteStrength", label: "Vignette", min: 0, max: 0.5, step: 0.01 },
+    { key: "edgeHardness", label: "Color Edge Hardness", min: 0, max: 1, step: 0.05 },
+    { key: "shimmerIntensity", label: "Shimmer Intensity", min: 0, max: 2, step: 0.1 },
   ];
 
   return (
@@ -345,7 +479,7 @@ function ControlPanel({ params, onChange, onReset }: ControlPanelProps) {
         top: 16,
         right: 16,
         zIndex: 1000,
-        width: isCollapsed ? "auto" : 320,
+        width: 320,
         maxHeight: "calc(100vh - 32px)",
         overflow: "hidden",
         display: "flex",
@@ -373,23 +507,29 @@ function ControlPanel({ params, onChange, onReset }: ControlPanelProps) {
         <span
           style={{
             color: "rgba(255, 255, 255, 0.9)",
-            fontSize: 14,
+            fontSize: 13,
             fontWeight: 600,
-            letterSpacing: "0.5px",
           }}
         >
-          ✨ Shader Controls
+          Shader Controls
         </span>
-        <span
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
           style={{
-            color: "rgba(255, 255, 255, 0.6)",
-            fontSize: 18,
             transform: isCollapsed ? "rotate(180deg)" : "rotate(0deg)",
-            transition: "transform 0.2s ease",
           }}
         >
-          ▼
-        </span>
+          <path
+            d="M4 6L8 10L12 6"
+            stroke="rgba(255, 255, 255, 0.6)"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       </div>
 
       {/* Controls Body */}
@@ -461,33 +601,57 @@ function ControlPanel({ params, onChange, onReset }: ControlPanelProps) {
             ))}
           </div>
 
-          {/* Reset Button */}
-          <button
-            onClick={onReset}
-            style={{
-              width: "100%",
-              marginTop: 20,
-              padding: "10px 16px",
-              background: "rgba(255, 255, 255, 0.1)",
-              border: "1px solid rgba(255, 255, 255, 0.2)",
-              borderRadius: 8,
-              color: "rgba(255, 255, 255, 0.8)",
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
-              e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.3)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
-              e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
-            }}
-          >
-            Reset to Defaults
-          </button>
+          {/* Buttons */}
+          <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+            <button
+              onClick={onSave}
+              style={{
+                flex: 1,
+                padding: "10px 16px",
+                background: "rgba(255, 255, 255, 0.15)",
+                border: "1px solid rgba(255, 255, 255, 0.25)",
+                borderRadius: 8,
+                color: "rgba(255, 255, 255, 0.9)",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.35)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.25)";
+              }}
+            >
+              Save as Default
+            </button>
+            <button
+              onClick={onReset}
+              style={{
+                flex: 1,
+                padding: "10px 16px",
+                background: "rgba(255, 255, 255, 0.1)",
+                border: "1px solid rgba(255, 255, 255, 0.2)",
+                borderRadius: 8,
+                color: "rgba(255, 255, 255, 0.8)",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.3)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
+              }}
+            >
+              Reset
+            </button>
+          </div>
         </div>
       )}
 
@@ -520,6 +684,22 @@ function ControlPanel({ params, onChange, onReset }: ControlPanelProps) {
   );
 }
 
+const STORAGE_KEY = "glassBarShaderParams";
+
+function loadSavedParams(): ShaderParams {
+  if (typeof window === "undefined") return defaultParams;
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return { ...defaultParams, ...parsed };
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return defaultParams;
+}
+
 export default function GlassBarShader() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number | null>(null);
@@ -529,9 +709,18 @@ export default function GlassBarShader() {
   
   const [params, setParams] = useState<ShaderParams>(defaultParams);
 
-  const handleReset = useCallback(() => {
-    setParams(defaultParams);
+  useEffect(() => {
+    setParams(loadSavedParams());
   }, []);
+
+  const handleReset = useCallback(() => {
+    const saved = loadSavedParams();
+    setParams(saved);
+  }, []);
+
+  const handleSave = useCallback(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(params));
+  }, [params]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -604,6 +793,13 @@ export default function GlassBarShader() {
       glassEdgeIntensity: gl.getUniformLocation(program, "u_glassEdgeIntensity"),
       causticIntensity: gl.getUniformLocation(program, "u_causticIntensity"),
       vignetteStrength: gl.getUniformLocation(program, "u_vignetteStrength"),
+      edgeHardness: gl.getUniformLocation(program, "u_edgeHardness"),
+      shimmerIntensity: gl.getUniformLocation(program, "u_shimmerIntensity"),
+      edgeWidth: gl.getUniformLocation(program, "u_edgeWidth"),
+      edgeWarmth: gl.getUniformLocation(program, "u_edgeWarmth"),
+      edgeRefraction: gl.getUniformLocation(program, "u_edgeRefraction"),
+      edgeBevelDepth: gl.getUniformLocation(program, "u_edgeBevelDepth"),
+      edgeChroma: gl.getUniformLocation(program, "u_edgeChroma"),
     };
 
     function resize() {
@@ -667,6 +863,13 @@ export default function GlassBarShader() {
     gl.uniform1f(locs.glassEdgeIntensity, params.glassEdgeIntensity);
     gl.uniform1f(locs.causticIntensity, params.causticIntensity);
     gl.uniform1f(locs.vignetteStrength, params.vignetteStrength);
+    gl.uniform1f(locs.edgeHardness, params.edgeHardness);
+    gl.uniform1f(locs.shimmerIntensity, params.shimmerIntensity);
+    gl.uniform1f(locs.edgeWidth, params.edgeWidth);
+    gl.uniform1f(locs.edgeWarmth, params.edgeWarmth);
+    gl.uniform1f(locs.edgeRefraction, params.edgeRefraction);
+    gl.uniform1f(locs.edgeBevelDepth, params.edgeBevelDepth);
+    gl.uniform1f(locs.edgeChroma, params.edgeChroma);
   }, [params]);
 
   return (
@@ -681,7 +884,7 @@ export default function GlassBarShader() {
           height: "100%",
         }}
       />
-      <ControlPanel params={params} onChange={setParams} onReset={handleReset} />
+      <ControlPanel params={params} onChange={setParams} onReset={handleReset} onSave={handleSave} />
     </>
   );
 }
