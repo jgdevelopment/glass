@@ -1786,7 +1786,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
     { key: "shimmerIntensity", label: "Shimmer Intensity", min: 0, max: 2, step: 0.1, section: "animation" },
     { key: "causticIntensity", label: "Caustic Intensity", min: 0, max: 3, step: 0.1, section: "animation" },
     // Noise controls
-    { key: "noiseScale", label: "Pattern Scale", min: 0.1, max: 3, step: 0.1, section: "noise" },
+    { key: "noiseScale", label: "Pattern Scale", min: 0.1, max: 3, step: 0.1, section: "glass" },
     { key: "noiseTextureDensity", label: "Noise Density", min: 100, max: 2000, step: 50, section: "noise" },
     { key: "noiseTextureIntensity", label: "Noise Intensity", min: 0, max: 0.3, step: 0.01, section: "noise" },
     { key: "noiseTextureSaturation", label: "Noise Color", min: 0, max: 1, step: 0.05, section: "noise" },
