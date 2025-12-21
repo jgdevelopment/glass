@@ -1,6 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  Palette,
+  Grid3X3,
+  Gem,
+  Sparkles,
+  Radio,
+  PanelTop,
+  ChevronDown,
+} from "lucide-react";
 
 interface ShaderParams {
   cols: number;
@@ -42,7 +51,7 @@ interface ShaderParams {
   color3R: number;
   color3G: number;
   color3B: number;
-  // Color 4: Orange/Amber
+  // Color 4: Yellow/Gold
   color4R: number;
   color4G: number;
   color4B: number;
@@ -64,64 +73,64 @@ interface ShaderParams {
 }
 
 const defaultParams: ShaderParams = {
-  cols: 35,
-  rows: 9,
-  gapX: 0.008,
-  gapY: 0.006,
-  refractionStrength: 0.08,
-  chromaStrength: 0.025,
-  speed: 0.15,
-  noiseScale: 0.8,
-  saturation: 1.6,
-  brightness: 1.1,
-  glassEdgeIntensity: 1.8,
-  causticIntensity: 0.2,
-  vignetteStrength: 0.05,
-  edgeHardness: 0.85,
-  shimmerIntensity: 0.5,
+  cols: 18,
+  rows: 1,
+  gapX: 0.012,
+  gapY: 0.0,
+  refractionStrength: 0.15,
+  chromaStrength: 0.03,
+  speed: 0.08,
+  noiseScale: 0.35,
+  saturation: 1.4,
+  brightness: 1.05,
+  glassEdgeIntensity: 1.6,
+  causticIntensity: 0.15,
+  vignetteStrength: 0.02,
+  edgeHardness: 0.75,
+  shimmerIntensity: 0.3,
   // New edge defaults - tuned to match reference
-  edgeWidth: 0.04,
-  edgeWarmth: 0.8,
-  edgeRefraction: 0.6,
-  edgeBevelDepth: 0.7,
-  edgeChroma: 0.5,
+  edgeWidth: 0.035,
+  edgeWarmth: 0.85,
+  edgeRefraction: 0.5,
+  edgeBevelDepth: 0.6,
+  edgeChroma: 0.4,
   // Noise texture defaults
-  noiseTextureDensity: 800.0,
-  noiseTextureIntensity: 0.08,
-  noiseTextureSaturation: 0.3,
-  noiseTextureSpeed: 15.0,
-  // RGB Color controls - tuned to match reference image
-  // Color 1: Bright Cyan (#00D4FF)
-  color1R: 0.0,
-  color1G: 0.83,
-  color1B: 1.0,
-  // Color 2: Deep Royal Blue (#1E3FBF)
-  color2R: 0.12,
-  color2G: 0.25,
-  color2B: 0.75,
-  // Color 3: Vermillion Red (#FF3B30)
-  color3R: 1.0,
-  color3G: 0.23,
-  color3B: 0.19,
-  // Color 4: Orange/Amber (#FF9500)
-  color4R: 1.0,
-  color4G: 0.58,
-  color4B: 0.0,
-  // Color 5: Pink/Magenta (#FF6B9D)
-  color5R: 1.0,
-  color5G: 0.42,
-  color5B: 0.62,
-  // Color 6: Highlight tint (warm white)
+  noiseTextureDensity: 600.0,
+  noiseTextureIntensity: 0.06,
+  noiseTextureSaturation: 0.25,
+  noiseTextureSpeed: 12.0,
+  // RGB Color controls - tuned to match reference image exactly
+  // Color 1: Bright Cyan (#5BC4E8)
+  color1R: 0.36,
+  color1G: 0.77,
+  color1B: 0.91,
+  // Color 2: Deep Royal Blue (#1B3BA8)
+  color2R: 0.11,
+  color2G: 0.23,
+  color2B: 0.66,
+  // Color 3: Vermillion Red/Orange (#E84420)
+  color3R: 0.91,
+  color3G: 0.27,
+  color3B: 0.13,
+  // Color 4: Golden Yellow (#F5A623)
+  color4R: 0.96,
+  color4G: 0.65,
+  color4B: 0.14,
+  // Color 5: Pink/Magenta (#C850A0)
+  color5R: 0.78,
+  color5G: 0.31,
+  color5B: 0.63,
+  // Color 6: Warm White highlight
   color6R: 1.0,
-  color6G: 0.98,
-  color6B: 0.95,
+  color6G: 0.97,
+  color6B: 0.92,
   // Color balance
-  colorContrast: 1.2,
-  colorMix: 0.5,
-  // Per-pane variation
-  paneBendVariance: 0.7,
-  paneColorShift: 0.5,
-  paneDistortVariance: 0.6,
+  colorContrast: 1.3,
+  colorMix: 0.6,
+  // Per-pane variation - INCREASED for visible difference per bar
+  paneBendVariance: 0.8,
+  paneColorShift: 1.0,
+  paneDistortVariance: 0.7,
 };
 
 const vertexShaderSource = `
@@ -288,20 +297,28 @@ const createFragmentShaderSource = () => `
     return smoothstep(edge - softness, edge + softness, x);
   }
   
-  // Background color - static regions with hard edges and shimmer
-  // Uses 6 RGB colors for precise color matching
-  // paneColorShift: per-pane color variation (-1 to 1)
+  // Background color - organic flowing regions like the reference image
+  // Each pane samples a different part of a continuous flowing gradient
   vec3 getBackgroundColor(vec2 uv, float time, float paneColorShift) {
-    // Slow shimmer animation (not flowing)
+    // Slow shimmer animation
     float shimmerTime = time * u_speed;
     float shimmerAmt = u_shimmerIntensity;
     
-    // Multiple noise layers at different scales - mostly static
-    float n1 = staticNoise(uv * 1.2 * u_noiseScale, shimmerTime, shimmerAmt);
-    float n2 = staticNoise(uv * 0.8 * u_noiseScale + vec2(5.2, 3.1), shimmerTime * 0.7, shimmerAmt);
-    float n3 = staticNoise(uv * 1.5 * u_noiseScale + vec2(2.7, 8.3), shimmerTime * 0.5, shimmerAmt);
-    float n4 = staticNoise(uv * 0.6 * u_noiseScale + vec2(9.1, 1.7), shimmerTime * 0.3, shimmerAmt);
-    float n5 = staticNoise(uv * 1.0 * u_noiseScale + vec2(3.5, 7.2), shimmerTime * 0.4, shimmerAmt);
+    // LARGE scale noise for sweeping color regions that span multiple panes
+    // This creates the flowing, organic look from the reference
+    float scale = u_noiseScale;
+    
+    // Apply significant per-pane offset to sample different regions
+    // This is the key to making each pane look different
+    vec2 paneOffset = vec2(paneColorShift * 0.8, paneColorShift * 0.4);
+    vec2 samplePos = uv + paneOffset;
+    
+    // Large-scale flowing noise layers
+    float n1 = staticNoise(samplePos * 0.5 * scale, shimmerTime, shimmerAmt);
+    float n2 = staticNoise(samplePos * 0.7 * scale + vec2(3.7, 2.1), shimmerTime * 0.6, shimmerAmt);
+    float n3 = staticNoise(samplePos * 0.4 * scale + vec2(1.5, 5.3), shimmerTime * 0.4, shimmerAmt);
+    float n4 = staticNoise(samplePos * 0.6 * scale + vec2(7.2, 0.8), shimmerTime * 0.5, shimmerAmt);
+    float n5 = staticNoise(samplePos * 0.8 * scale + vec2(2.1, 4.6), shimmerTime * 0.3, shimmerAmt);
     
     // Normalize to 0-1
     float t1 = n1 * 0.5 + 0.5;
@@ -310,7 +327,7 @@ const createFragmentShaderSource = () => `
     float t4 = n4 * 0.5 + 0.5;
     float t5 = n5 * 0.5 + 0.5;
     
-    // Apply contrast adjustment to noise values
+    // Apply contrast for more defined regions
     float contrast = u_colorContrast;
     t1 = clamp((t1 - 0.5) * contrast + 0.5, 0.0, 1.0);
     t2 = clamp((t2 - 0.5) * contrast + 0.5, 0.0, 1.0);
@@ -318,89 +335,91 @@ const createFragmentShaderSource = () => `
     t4 = clamp((t4 - 0.5) * contrast + 0.5, 0.0, 1.0);
     t5 = clamp((t5 - 0.5) * contrast + 0.5, 0.0, 1.0);
     
-    // Use the 6 RGB colors directly
-    // Color 1: Cyan/Light Blue (primary cool)
+    // Create a global position value for color distribution across the screen
+    // Combined with paneOffset, this creates the left-to-right color flow
+    float globalX = (samplePos.x + 0.5) * 0.5; // 0 to 1 across screen
+    float globalY = samplePos.y;
+    
+    // Define colors from uniforms
     vec3 cyan = u_color1;
-    vec3 cyanDark = cyan * 0.4;
-    vec3 cyanLight = mix(cyan, vec3(1.0), 0.3);
-    
-    // Color 2: Deep Blue (secondary cool)
     vec3 deepBlue = u_color2;
-    vec3 deepBlueDark = deepBlue * 0.5;
-    
-    // Color 3: Red (primary warm)
     vec3 red = u_color3;
-    vec3 redDark = red * 0.6;
-    
-    // Color 4: Orange/Amber (secondary warm)
-    vec3 orange = u_color4;
-    vec3 orangeLight = mix(orange, vec3(1.0), 0.25);
-    
-    // Color 5: Pink/Magenta (accent)
+    vec3 yellow = u_color4; // Now yellow/gold
     vec3 pink = u_color5;
-    vec3 pinkLight = mix(pink, vec3(1.0), 0.3);
-    
-    // Color 6: Highlight tint
     vec3 highlight = u_color6;
-    vec3 white = vec3(1.0, 1.0, 1.0);
-    vec3 black = vec3(0.0, 0.0, 0.0);
+    vec3 white = vec3(1.0);
+    vec3 black = vec3(0.0);
     
-    // Per-pane color variation - subtle shifts
-    float paneShift = paneColorShift * u_paneColorShift;
+    // Orange derived from red and yellow
+    vec3 orange = mix(red, yellow, 0.5);
     
-    // Hard edge transition threshold
-    float edgeSoft = 0.15 * (1.0 - u_edgeHardness * 0.9);
+    // Edge softness for color transitions
+    float edgeSoft = 0.12 * (1.0 - u_edgeHardness * 0.85);
     
-    // Base - start with black
+    // === CREATE FLOWING COLOR REGIONS ===
+    // The reference shows large organic color pools that flow across the image
+    
+    // Start with black base
     vec3 col = black;
     
-    // === BLUE/CYAN REGIONS ===
-    // Deep blue base
-    col = mix(col, deepBlueDark, hardStep(0.2, t1, edgeSoft));
-    col = mix(col, deepBlue, hardStep(0.35, t1, edgeSoft) * hardStep(0.25, t2, edgeSoft));
+    // === DEEP BLUE REGIONS (right side tendency in reference) ===
+    float blueZone = hardStep(0.3, t1, edgeSoft) * hardStep(0.25, t2, edgeSoft);
+    blueZone *= (1.0 - hardStep(0.7, t3, edgeSoft * 0.5)); // Not where it's very bright
+    col = mix(col, deepBlue * 0.4, hardStep(0.15, t1, edgeSoft));
+    col = mix(col, deepBlue * 0.7, blueZone * 0.8);
+    col = mix(col, deepBlue, blueZone * hardStep(0.4, t1, edgeSoft));
     
-    // Cyan areas
-    float cyanMask = hardStep(0.45, t1, edgeSoft) * hardStep(0.4, t2, edgeSoft);
-    col = mix(col, cyan, cyanMask);
-    col = mix(col, cyanLight, cyanMask * hardStep(0.6, t3, edgeSoft));
+    // === CYAN REGIONS (flowing into blue) ===
+    float cyanZone = hardStep(0.5, t1, edgeSoft) * hardStep(0.45, t2, edgeSoft);
+    cyanZone = max(cyanZone, hardStep(0.55, t2, edgeSoft) * hardStep(0.4, t3, edgeSoft));
+    col = mix(col, cyan * 0.8, cyanZone * 0.7);
+    col = mix(col, cyan, cyanZone * hardStep(0.55, t1, edgeSoft));
+    col = mix(col, mix(cyan, white, 0.3), cyanZone * hardStep(0.65, t3, 0.08));
     
-    // === RED REGIONS ===
-    float redBase = hardStep(0.35, t3, edgeSoft) * (1.0 - hardStep(0.55, t1, edgeSoft));
-    float redMask = redBase * hardStep(0.45, t4, edgeSoft);
-    col = mix(col, redDark, redBase * 0.7);
-    col = mix(col, red, redMask);
+    // === RED/VERMILLION REGIONS (left side and scattered) ===
+    float redZone = hardStep(0.35, t3, edgeSoft) * (1.0 - hardStep(0.55, t1, edgeSoft));
+    redZone *= hardStep(0.3, t4, edgeSoft);
+    col = mix(col, red * 0.6, redZone * 0.6);
+    col = mix(col, red, redZone * hardStep(0.45, t4, edgeSoft));
     
-    // === ORANGE/AMBER REGIONS ===
-    float warmBase = hardStep(0.4, t4, edgeSoft) * hardStep(0.3, t5, edgeSoft);
-    warmBase *= (1.0 - hardStep(0.65, t1, edgeSoft));
+    // === ORANGE REGIONS (scattered warm spots) ===
+    float orangeZone = hardStep(0.4, t4, edgeSoft) * hardStep(0.35, t5, edgeSoft);
+    orangeZone *= (1.0 - cyanZone * 0.6);
+    col = mix(col, orange, orangeZone * 0.8);
+    col = mix(col, mix(orange, yellow, 0.3), orangeZone * hardStep(0.5, t2, edgeSoft));
     
-    col = mix(col, orange, warmBase * 0.8);
-    col = mix(col, orangeLight, warmBase * hardStep(0.55, t2, edgeSoft) * 0.6);
+    // === YELLOW/GOLD REGIONS (bright warm highlights) ===
+    float yellowZone = hardStep(0.55, t4, edgeSoft) * hardStep(0.5, t5, edgeSoft);
+    yellowZone *= hardStep(0.4, t3, edgeSoft);
+    col = mix(col, yellow, yellowZone * 0.7);
+    col = mix(col, mix(yellow, white, 0.25), yellowZone * hardStep(0.6, t2, 0.06));
     
-    // Hot orange spots
-    float hotMask = warmBase * hardStep(0.6, t3, 0.05) * hardStep(0.55, t4, 0.05);
-    col = mix(col, orange * 1.1, hotMask);
-    
-    // === PINK/MAGENTA ACCENTS ===
-    float pinkZone = hardStep(0.5, t2, edgeSoft) * hardStep(0.45, t5, edgeSoft);
-    pinkZone *= (1.0 - warmBase * 0.5) * (1.0 - cyanMask * 0.5);
-    col = mix(col, pink, pinkZone * 0.6);
-    col = mix(col, pinkLight, pinkZone * hardStep(0.65, t1, 0.06) * 0.5);
+    // === PINK/MAGENTA ACCENTS (corners and edges) ===
+    float pinkZone = hardStep(0.45, t2, edgeSoft) * hardStep(0.5, t5, edgeSoft);
+    pinkZone *= (1.0 - orangeZone * 0.6) * (1.0 - cyanZone * 0.7);
+    pinkZone *= (1.0 - hardStep(0.6, t1, edgeSoft * 0.5));
+    col = mix(col, pink, pinkZone * 0.5);
+    col = mix(col, mix(pink, white, 0.3), pinkZone * hardStep(0.55, t3, 0.08) * 0.4);
     
     // === WHITE/HIGHLIGHT REGIONS ===
-    float whiteMask = hardStep(0.7, t1, 0.06) * hardStep(0.65, t2, 0.06);
-    whiteMask = max(whiteMask, hardStep(0.75, t4, 0.05) * hardStep(0.7, t3, 0.05));
-    col = mix(col, highlight, whiteMask);
-    col = mix(col, white, whiteMask * hardStep(0.8, t3, 0.04));
+    float whiteMask = hardStep(0.72, t1, 0.05) * hardStep(0.68, t2, 0.05);
+    whiteMask = max(whiteMask, hardStep(0.75, t4, 0.04) * hardStep(0.7, t5, 0.05));
+    col = mix(col, highlight, whiteMask * 0.8);
+    col = mix(col, white, whiteMask * hardStep(0.8, t3, 0.03));
     
     // === BLACK/SHADOW REGIONS ===
-    float darkMask = (1.0 - hardStep(0.18, t1, edgeSoft)) * (1.0 - hardStep(0.22, t2, edgeSoft));
-    col = mix(col, black, darkMask);
+    float darkMask = (1.0 - hardStep(0.2, t1, edgeSoft)) * (1.0 - hardStep(0.25, t2, edgeSoft));
+    darkMask *= (1.0 - hardStep(0.3, t3, edgeSoft));
+    col = mix(col, black, darkMask * 0.9);
     
-    // Add some color bleeding between regions for smoother transitions
-    float bleedMask = hardStep(0.4, t5, 0.1) * (1.0 - hardStep(0.6, t5, 0.1));
-    vec3 blendColor = mix(cyan, orange, t3);
-    col = mix(col, blendColor, bleedMask * 0.15 * u_colorMix);
+    // === COLOR BLEEDING/BLENDING for organic flow ===
+    float bleedMask = hardStep(0.35, t5, 0.15) * (1.0 - hardStep(0.65, t5, 0.15));
+    vec3 blendColor = mix(cyan, orange, smoothstep(0.3, 0.7, t3));
+    col = mix(col, blendColor, bleedMask * 0.2 * u_colorMix);
+    
+    // Additional cyan-to-blue transition blending
+    float transitionMask = hardStep(0.4, t1, 0.2) * (1.0 - hardStep(0.6, t1, 0.2));
+    col = mix(col, mix(deepBlue, cyan, t2), transitionMask * 0.15 * u_colorMix);
     
     // Boost saturation
     float lum = dot(col, vec3(0.299, 0.587, 0.114));
@@ -458,8 +477,11 @@ const createFragmentShaderSource = () => `
     // Per-pane distortion multiplier
     float paneDistortMult = 1.0 + (paneRand3 - 0.5) * u_paneDistortVariance * 2.0;
     
-    // Per-pane hue shift
-    float paneHueShift = (paneRand.x + paneRand.y - 1.0); // -1 to 1
+    // Per-pane color offset - LARGE offset so each bar samples a different part of the gradient
+    // This is the key to getting different colors in each pane like the reference
+    float paneColorOffset = colIndex / cols * 2.0 + paneRand.x * 1.5 + paneRand.y * 0.8;
+    paneColorOffset += rowIndex * 0.3; // Also vary by row
+    float paneHueShift = paneColorOffset * u_paneColorShift;
     
     // Refraction offset - static lens distortion with per-pane variation
     float refractionStrength = u_refractionStrength * paneDistortMult;
@@ -480,10 +502,17 @@ const createFragmentShaderSource = () => `
     // Base UV for sampling background - static per bar
     vec2 sampleUv = uv + refractOffset;
     
-    // Per-bar unique offset (static, not animated) - enhanced variation
+    // Per-bar unique offset - MUCH LARGER to create visible color variation per pane
+    // Each bar should sample a different region of the color gradient
     float barSeed = colIndex * 0.73 + rowIndex * 1.37;
-    float barOffsetX = sin(barSeed) * 0.012 * (1.0 + paneBendAmt * 0.5);
-    float barOffsetY = cos(barSeed * 1.3) * 0.008 * (1.0 + paneBendAmt * 0.5);
+    
+    // Large horizontal offset based on column position and random seed
+    float barOffsetX = (colIndex / cols) * 0.15 + sin(barSeed) * 0.08;
+    barOffsetX += paneRand.x * 0.12 * u_paneColorShift;
+    
+    // Vertical offset for additional variation
+    float barOffsetY = cos(barSeed * 1.3) * 0.04 + paneRand.y * 0.06;
+    
     sampleUv.x += barOffsetX;
     sampleUv.y += barOffsetY;
     
@@ -707,14 +736,13 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
 }
 
 interface ColorPickerProps {
-  label: string;
   colorR: number;
   colorG: number;
   colorB: number;
   onChange: (r: number, g: number, b: number) => void;
 }
 
-function ColorPicker({ label, colorR, colorG, colorB, onChange }: ColorPickerProps) {
+function ColorPicker({ colorR, colorG, colorB, onChange }: ColorPickerProps) {
   const hexValue = rgbToHex(colorR, colorG, colorB);
   
   const handleColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -723,69 +751,127 @@ function ColorPicker({ label, colorR, colorG, colorB, onChange }: ColorPickerPro
   };
   
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+      <label
         style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 6,
+          position: "relative",
+          width: 44,
+          height: 44,
+          borderRadius: 8,
+          overflow: "hidden",
+          cursor: "pointer",
+          border: "1px solid rgba(255, 255, 255, 0.2)",
         }}
       >
-        <label
+        <div
           style={{
-            color: "rgba(255, 255, 255, 0.8)",
-            fontSize: 12,
-            fontWeight: 500,
+            position: "absolute",
+            inset: 0,
+            background: hexValue,
           }}
-        >
-          {label}
-        </label>
-        <span
-          style={{
-            color: "rgba(255, 255, 255, 0.5)",
-            fontSize: 11,
-            fontFamily: "monospace",
-            background: "rgba(255, 255, 255, 0.1)",
-            padding: "2px 6px",
-            borderRadius: 4,
-          }}
-        >
-          {hexValue.toUpperCase()}
-        </span>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        />
         <input
           type="color"
           value={hexValue}
           onChange={handleColorChange}
           style={{
-            width: 40,
-            height: 28,
-            border: "1px solid rgba(255, 255, 255, 0.2)",
-            borderRadius: 6,
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            opacity: 0,
             cursor: "pointer",
-            background: "transparent",
-            padding: 0,
           }}
         />
-        <div
-          style={{
-            flex: 1,
-            height: 28,
-            borderRadius: 6,
-            background: `linear-gradient(to right, ${hexValue}, ${hexValue})`,
-            border: "1px solid rgba(255, 255, 255, 0.15)",
-          }}
-        />
-      </div>
+      </label>
+      <span
+        style={{
+          color: "rgba(255, 255, 255, 0.6)",
+          fontSize: 9,
+          fontFamily: "monospace",
+          textTransform: "uppercase",
+        }}
+      >
+        {hexValue.toUpperCase()}
+      </span>
     </div>
   );
+}
+
+type Corner = "top-right" | "top-left" | "bottom-right" | "bottom-left";
+
+// Compare two ShaderParams objects for equality
+function paramsEqual(a: ShaderParams, b: ShaderParams): boolean {
+  const keys = Object.keys(a) as (keyof ShaderParams)[];
+  for (const key of keys) {
+    // Use small epsilon for floating point comparison
+    if (Math.abs(a[key] - b[key]) > 0.0001) return false;
+  }
+  return true;
 }
 
 function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [activeSection, setActiveSection] = useState<string>("colors");
+  const [corner, setCorner] = useState<Corner>("top-right");
+  const [isDragging, setIsDragging] = useState(false);
+  const [savedParams, setSavedParams] = useState<ShaderParams>(defaultParams);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const isTop = corner.startsWith("top");
+  const isRight = corner.endsWith("right");
+  
+  // Check if current params match saved params
+  const hasChanges = !paramsEqual(params, savedParams);
+
+  // Load saved params on mount
+  useEffect(() => {
+    const saved = loadSavedParams();
+    setSavedParams(saved);
+  }, []);
+
+  // Update saved params when save is called
+  const handleSave = () => {
+    onSave();
+    setSavedParams({ ...params });
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).tagName === "BUTTON" || 
+        (e.target as HTMLElement).tagName === "INPUT") return;
+    setIsDragging(true);
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const windowWidth = window.innerWidth;
+      const windowHeight = window.innerHeight;
+      const centerX = windowWidth / 2;
+      const centerY = windowHeight / 2;
+
+      const newIsRight = e.clientX > centerX;
+      const newIsTop = e.clientY < centerY;
+
+      const newCorner: Corner = `${newIsTop ? "top" : "bottom"}-${newIsRight ? "right" : "left"}`;
+      if (newCorner !== corner) {
+        setCorner(newCorner);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging, corner]);
 
   const handleChange = (key: keyof ShaderParams, value: number) => {
     onChange({ ...params, [key]: value });
@@ -801,12 +887,12 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
   };
 
   const colorControls = [
-    { prefix: "color1", label: "Cyan / Light Blue" },
-    { prefix: "color2", label: "Deep Blue" },
-    { prefix: "color3", label: "Red" },
-    { prefix: "color4", label: "Orange / Amber" },
-    { prefix: "color5", label: "Pink / Magenta" },
-    { prefix: "color6", label: "Highlight Tint" },
+    { prefix: "color1" },
+    { prefix: "color2" },
+    { prefix: "color3" },
+    { prefix: "color4" },
+    { prefix: "color5" },
+    { prefix: "color6" },
   ];
 
   const controls: {
@@ -851,49 +937,54 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
     { key: "paneBendVariance", label: "Pane Bend Variance", min: 0, max: 1, step: 0.05, section: "pane" },
     { key: "paneColorShift", label: "Pane Color Shift", min: 0, max: 1, step: 0.05, section: "pane" },
     { key: "paneDistortVariance", label: "Pane Distort Variance", min: 0, max: 1, step: 0.05, section: "pane" },
-    // Other
-    { key: "vignetteStrength", label: "Vignette", min: 0, max: 0.5, step: 0.01, section: "other" },
+    { key: "vignetteStrength", label: "Vignette", min: 0, max: 0.5, step: 0.01, section: "colors" },
   ];
   
   const sections = [
-    { id: "colors", label: "🎨 Colors" },
-    { id: "grid", label: "📐 Grid" },
-    { id: "glass", label: "🔮 Glass" },
-    { id: "animation", label: "✨ Animation" },
-    { id: "noise", label: "📺 Noise" },
-    { id: "pane", label: "🪟 Pane Variation" },
-    { id: "other", label: "⚙️ Other" },
+    { id: "colors", label: "Colors", icon: Palette },
+    { id: "grid", label: "Grid", icon: Grid3X3 },
+    { id: "glass", label: "Glass", icon: Gem },
+    { id: "animation", label: "Animation", icon: Sparkles },
+    { id: "noise", label: "Noise", icon: Radio },
+    { id: "pane", label: "Pane Variation", icon: PanelTop },
   ];
 
-  return (
+  const getHeaderBorderRadius = () => {
+    if (isCollapsed) return 12;
+    if (isTop) return "12px 12px 0 0";
+    return "0 0 12px 12px";
+  };
+
+  const getBodyBorderRadius = () => {
+    if (isTop) return "0 0 12px 12px";
+    return "12px 12px 0 0";
+  };
+
+  const headerElement = (
     <div
       style={{
-        position: "fixed",
-        top: 16,
-        right: 16,
-        zIndex: 1000,
-        width: 320,
-        maxHeight: "calc(100vh - 32px)",
-        overflow: "hidden",
+        background: "rgba(0, 0, 0, 0.6)",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
+        borderRadius: getHeaderBorderRadius(),
+        border: "1px solid rgba(255, 255, 255, 0.15)",
+        borderBottom: isCollapsed || !isTop ? undefined : "none",
+        borderTop: isCollapsed || isTop ? undefined : "none",
+        padding: "12px 16px",
         display: "flex",
-        flexDirection: "column",
+        justifyContent: "space-between",
+        alignItems: "center",
+        userSelect: "none",
+        cursor: isDragging ? "grabbing" : "grab",
       }}
+      onMouseDown={handleMouseDown}
     >
-      {/* Header */}
       <div
         style={{
-          background: "rgba(0, 0, 0, 0.6)",
-          backdropFilter: "blur(20px)",
-          WebkitBackdropFilter: "blur(20px)",
-          borderRadius: isCollapsed ? 12 : "12px 12px 0 0",
-          border: "1px solid rgba(255, 255, 255, 0.15)",
-          borderBottom: isCollapsed ? undefined : "none",
-          padding: "12px 16px",
           display: "flex",
-          justifyContent: "space-between",
           alignItems: "center",
+          gap: 8,
           cursor: "pointer",
-          userSelect: "none",
         }}
         onClick={() => setIsCollapsed(!isCollapsed)}
       >
@@ -906,24 +997,88 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
         >
           Shader Controls
         </span>
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 16 16"
-          fill="none"
+        <ChevronDown
+          size={16}
+          color="rgba(255, 255, 255, 0.6)"
           style={{
-            transform: isCollapsed ? "rotate(180deg)" : "rotate(0deg)",
+            transform: isCollapsed 
+              ? (isTop ? "rotate(180deg)" : "rotate(0deg)")
+              : (isTop ? "rotate(0deg)" : "rotate(180deg)"),
           }}
-        >
-          <path
-            d="M4 6L8 10L12 6"
-            stroke="rgba(255, 255, 255, 0.6)"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        />
       </div>
+      {hasChanges && (
+        <div style={{ display: "flex", gap: 12 }}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleSave();
+            }}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "rgba(255, 255, 255, 0.7)",
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: "pointer",
+              padding: 0,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "rgba(255, 255, 255, 1)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "rgba(255, 255, 255, 0.7)";
+            }}
+          >
+            Save
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onReset();
+            }}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "rgba(255, 255, 255, 0.7)",
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: "pointer",
+              padding: 0,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "rgba(255, 255, 255, 1)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "rgba(255, 255, 255, 0.7)";
+            }}
+          >
+            Reset
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div
+      ref={panelRef}
+      style={{
+        position: "fixed",
+        top: isTop ? 16 : undefined,
+        bottom: !isTop ? 16 : undefined,
+        right: isRight ? 16 : undefined,
+        left: !isRight ? 16 : undefined,
+        zIndex: 1000,
+        width: 320,
+        maxHeight: "calc(100vh - 32px)",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {/* Header - render first if top corners */}
+      {isTop && headerElement}
 
       {/* Controls Body */}
       {!isCollapsed && (
@@ -932,12 +1087,14 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
             background: "rgba(0, 0, 0, 0.5)",
             backdropFilter: "blur(20px)",
             WebkitBackdropFilter: "blur(20px)",
-            borderRadius: "0 0 12px 12px",
+            borderRadius: getBodyBorderRadius(),
             border: "1px solid rgba(255, 255, 255, 0.15)",
-            borderTop: "none",
+            borderTop: isTop ? "none" : undefined,
+            borderBottom: !isTop ? "none" : undefined,
             padding: 16,
             overflowY: "auto",
             flex: 1,
+            order: isTop ? 1 : 0,
           }}
         >
           {/* Section Tabs */}
@@ -949,7 +1106,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
               marginBottom: 16,
             }}
           >
-            {sections.map(({ id, label }) => (
+            {sections.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 onClick={() => setActiveSection(id)}
@@ -963,21 +1120,31 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
                   color: activeSection === id ? "rgba(255, 255, 255, 0.95)" : "rgba(255, 255, 255, 0.6)",
                   cursor: "pointer",
                   transition: "all 0.15s ease",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
                 }}
               >
+                <Icon size={12} />
                 {label}
               </button>
             ))}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* Color Pickers for Colors Section */}
+            {/* Color Pickers Grid for Colors Section */}
             {activeSection === "colors" && (
-              <div style={{ marginBottom: 8 }}>
-                {colorControls.map(({ prefix, label }) => (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, 1fr)",
+                  gap: 12,
+                  marginBottom: 8,
+                }}
+              >
+                {colorControls.map(({ prefix }) => (
                   <ColorPicker
                     key={prefix}
-                    label={label}
                     colorR={params[`${prefix}R` as keyof ShaderParams] as number}
                     colorG={params[`${prefix}G` as keyof ShaderParams] as number}
                     colorB={params[`${prefix}B` as keyof ShaderParams] as number}
@@ -1043,59 +1210,11 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
               ))}
           </div>
 
-          {/* Buttons */}
-          <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
-            <button
-              onClick={onSave}
-              style={{
-                flex: 1,
-                padding: "10px 16px",
-                background: "rgba(255, 255, 255, 0.15)",
-                border: "1px solid rgba(255, 255, 255, 0.25)",
-                borderRadius: 8,
-                color: "rgba(255, 255, 255, 0.9)",
-                fontSize: 13,
-                fontWeight: 500,
-                cursor: "pointer",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.35)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.25)";
-              }}
-            >
-              Save as Default
-            </button>
-            <button
-              onClick={onReset}
-              style={{
-                flex: 1,
-                padding: "10px 16px",
-                background: "rgba(255, 255, 255, 0.1)",
-                border: "1px solid rgba(255, 255, 255, 0.2)",
-                borderRadius: 8,
-                color: "rgba(255, 255, 255, 0.8)",
-                fontSize: 13,
-                fontWeight: 500,
-                cursor: "pointer",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.3)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
-              }}
-            >
-              Reset
-            </button>
-          </div>
         </div>
       )}
+
+      {/* Header - render last if bottom corners */}
+      {!isTop && headerElement}
 
       {/* Slider thumb styles */}
       <style>{`
