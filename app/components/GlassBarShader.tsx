@@ -1759,17 +1759,17 @@ function ColorPicker({ colorR, colorG, colorB, onChange }: ColorPickerProps) {
           overflow: "hidden",
           cursor: "pointer",
           background: hexValue,
-          boxShadow: isOpen ? "0 0 0 2px rgba(255, 255, 255, 0.5)" : "none",
+          boxShadow: isOpen ? "0 0 0 2px rgba(var(--glass-fg-rgb), 0.5)" : "none",
         }}
       />
       <span
         className="value-badge"
         style={{
-          color: "rgba(255, 255, 255, 0.5)",
+          color: "rgba(var(--glass-fg-rgb), 0.5)",
           fontSize: 9,
           fontFamily: "monospace",
           textTransform: "uppercase",
-          background: "rgba(255, 255, 255, 0.1)",
+          background: "rgba(var(--glass-fg-rgb), var(--glass-value-bg-alpha))",
           padding: "2px 4px",
           borderRadius: 4,
         }}
@@ -1797,8 +1797,8 @@ function ColorPicker({ colorR, colorG, colorB, onChange }: ColorPickerProps) {
             styles={{
               default: {
                 picker: {
-                  background: "#1a1a1a",
-                  boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)",
+                  background: "var(--glass-picker-bg)",
+                  boxShadow: "0 4px 20px rgba(var(--glass-shadow-rgb), 0.5)",
                 },
                 saturation: {
                   borderRadius: "4px 4px 0 0",
@@ -1807,7 +1807,7 @@ function ColorPicker({ colorR, colorG, colorB, onChange }: ColorPickerProps) {
                   borderRadius: "2px",
                 },
                 activeColor: {
-                  boxShadow: "inset 0 0 0 1px rgba(255, 255, 255, 0.1)",
+                  boxShadow: "inset 0 0 0 1px rgba(var(--glass-fg-rgb), 0.1)",
                 },
               },
             }}
@@ -1819,6 +1819,87 @@ function ColorPicker({ colorR, colorG, colorB, onChange }: ColorPickerProps) {
 }
 
 type Corner = "top-right" | "top-left" | "bottom-right" | "bottom-left";
+type GlassTheme = "light" | "dark" | "high-contrast";
+
+const GLASS_THEME_OPTIONS: Array<{ id: GlassTheme; label: string }> = [
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+  { id: "high-contrast", label: "High Contrast" },
+];
+
+type GlassThemeCssVars = Record<`--${string}`, string>;
+
+const GLASS_THEME_VARS: Record<GlassTheme, GlassThemeCssVars> = {
+  light: {
+    "--glass-fg-rgb": "17, 24, 39",
+    "--glass-bg-rgb": "255, 255, 255",
+    "--glass-shadow-rgb": "15, 23, 42",
+    "--glass-header-bg-alpha": "0.75",
+    "--glass-body-bg-alpha": "0.68",
+    "--glass-header-hover-alpha": "0.82",
+    "--glass-border-alpha": "0.22",
+    "--glass-tab-active-bg-alpha": "0.16",
+    "--glass-tab-inactive-bg-alpha": "0.07",
+    "--glass-tab-active-border-alpha": "0.32",
+    "--glass-tab-inactive-border-alpha": "0.18",
+    "--glass-input-bg-alpha": "0.10",
+    "--glass-value-bg-alpha": "0.12",
+    "--glass-track-active-alpha": "0.45",
+    "--glass-track-inactive-alpha": "0.18",
+    "--glass-picker-bg": "#f8fafc",
+    "--glass-picker-input-bg": "#ffffff",
+    "--glass-picker-text": "#111827",
+    "--glass-select-option-bg": "#ffffff",
+    "--glass-select-option-text": "#111827",
+    "--glass-slider-thumb-color": "#111827",
+  },
+  dark: {
+    "--glass-fg-rgb": "255, 255, 255",
+    "--glass-bg-rgb": "0, 0, 0",
+    "--glass-shadow-rgb": "0, 0, 0",
+    "--glass-header-bg-alpha": "0.6",
+    "--glass-body-bg-alpha": "0.5",
+    "--glass-header-hover-alpha": "0.65",
+    "--glass-border-alpha": "0.15",
+    "--glass-tab-active-bg-alpha": "0.2",
+    "--glass-tab-inactive-bg-alpha": "0.05",
+    "--glass-tab-active-border-alpha": "0.3",
+    "--glass-tab-inactive-border-alpha": "0.1",
+    "--glass-input-bg-alpha": "0.08",
+    "--glass-value-bg-alpha": "0.1",
+    "--glass-track-active-alpha": "0.35",
+    "--glass-track-inactive-alpha": "0.12",
+    "--glass-picker-bg": "#1a1a1a",
+    "--glass-picker-input-bg": "#2a2a2a",
+    "--glass-picker-text": "#ffffff",
+    "--glass-select-option-bg": "#1a1a1a",
+    "--glass-select-option-text": "#ffffff",
+    "--glass-slider-thumb-color": "#ffffff",
+  },
+  "high-contrast": {
+    "--glass-fg-rgb": "255, 255, 255",
+    "--glass-bg-rgb": "0, 0, 0",
+    "--glass-shadow-rgb": "0, 0, 0",
+    "--glass-header-bg-alpha": "0.92",
+    "--glass-body-bg-alpha": "0.9",
+    "--glass-header-hover-alpha": "1",
+    "--glass-border-alpha": "0.65",
+    "--glass-tab-active-bg-alpha": "0.34",
+    "--glass-tab-inactive-bg-alpha": "0.12",
+    "--glass-tab-active-border-alpha": "0.85",
+    "--glass-tab-inactive-border-alpha": "0.5",
+    "--glass-input-bg-alpha": "0.2",
+    "--glass-value-bg-alpha": "0.24",
+    "--glass-track-active-alpha": "0.7",
+    "--glass-track-inactive-alpha": "0.28",
+    "--glass-picker-bg": "#000000",
+    "--glass-picker-input-bg": "#000000",
+    "--glass-picker-text": "#ffffff",
+    "--glass-select-option-bg": "#000000",
+    "--glass-select-option-text": "#ffffff",
+    "--glass-slider-thumb-color": "#ffffff",
+  },
+};
 
 // Compare two ShaderParams objects for equality
 function paramsEqual(a: ShaderParams, b: ShaderParams): boolean {
@@ -1843,12 +1924,15 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
   const [isCollapsedState, setIsCollapsedState] = useState(false);
   const [activeSection, setActiveSection] = useState<string>("colors");
   const [corner, setCornerState] = useState<Corner>("top-right");
+  const [glassTheme, setGlassThemeState] = useState<GlassTheme>("dark");
   
   // Load saved corner and collapsed state on mount, then mark as hydrated
   useEffect(() => {
     const savedCorner = loadSavedCorner();
+    const initialTheme = loadSavedTheme();
     setCornerState(savedCorner);
     setIsCollapsedState(loadSavedCollapsed());
+    setGlassThemeState(initialTheme);
     
     // Compute initial snapped position synchronously based on saved corner
     const isRight = savedCorner.endsWith("right");
@@ -1870,6 +1954,15 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
     setIsCollapsedState(collapsed);
     saveCollapsed(collapsed);
   }, []);
+
+  const setGlassTheme = useCallback((theme: GlassTheme) => {
+    setGlassThemeState(theme);
+    saveTheme(theme);
+  }, []);
+
+  const syncThemeWithVSCode = useCallback(() => {
+    setGlassTheme(detectVSCodeThemeCategory());
+  }, [setGlassTheme]);
   
   const isCollapsed = isCollapsedState;
   const [isDragging, setIsDragging] = useState(false);
@@ -1880,6 +1973,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
   const panelRef = useRef<HTMLDivElement>(null);
   const wasDraggingRef = useRef(false);
   const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const panelThemeVars = GLASS_THEME_VARS[glassTheme] as React.CSSProperties;
 
   const isTop = corner.startsWith("top");
   const isRight = corner.endsWith("right");
@@ -2150,11 +2244,11 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
     <div
       className="panel-header"
       style={{
-        background: "rgba(0, 0, 0, 0.6)",
+        background: "rgba(var(--glass-bg-rgb), var(--glass-header-bg-alpha))",
         backdropFilter: "blur(20px)",
         WebkitBackdropFilter: "blur(20px)",
         borderRadius: getHeaderBorderRadius(),
-        border: "1px solid rgba(255, 255, 255, 0.15)",
+        border: "1px solid rgba(var(--glass-fg-rgb), var(--glass-border-alpha))",
         borderBottom: isCollapsed || !isTop ? undefined : "none",
         borderTop: isCollapsed || isTop ? undefined : "none",
         padding: "12px 16px",
@@ -2178,7 +2272,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
       >
         <span
           style={{
-            color: "rgba(255, 255, 255, 0.9)",
+            color: "rgba(var(--glass-fg-rgb), 0.9)",
             fontSize: 13,
             fontWeight: 600,
           }}
@@ -2194,7 +2288,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
         >
           <ChevronDown
             size={16}
-            color="rgba(255, 255, 255, 0.6)"
+            color="rgba(var(--glass-fg-rgb), 0.6)"
           />
         </span>
       </div>
@@ -2210,17 +2304,17 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
             style={{
               background: "transparent",
               border: "none",
-              color: "rgba(255, 255, 255, 0.7)",
+              color: "rgba(var(--glass-fg-rgb), 0.7)",
               fontSize: 12,
               fontWeight: 600,
               cursor: "pointer",
               padding: 0,
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = "rgba(255, 255, 255, 1)";
+              e.currentTarget.style.color = "rgba(var(--glass-fg-rgb), 1)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = "rgba(255, 255, 255, 0.7)";
+              e.currentTarget.style.color = "rgba(var(--glass-fg-rgb), 0.7)";
             }}
           >
             Save
@@ -2235,17 +2329,17 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
             style={{
               background: "transparent",
               border: "none",
-              color: "rgba(255, 255, 255, 0.7)",
+              color: "rgba(var(--glass-fg-rgb), 0.7)",
               fontSize: 12,
               fontWeight: 600,
               cursor: "pointer",
               padding: 0,
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = "rgba(255, 255, 255, 1)";
+              e.currentTarget.style.color = "rgba(var(--glass-fg-rgb), 1)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = "rgba(255, 255, 255, 0.7)";
+              e.currentTarget.style.color = "rgba(var(--glass-fg-rgb), 0.7)";
             }}
           >
             Reset
@@ -2306,7 +2400,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
   return (
     <div
       ref={panelRef}
-      style={getPositionStyles()}
+      style={{ ...getPositionStyles(), ...panelThemeVars }}
     >
       {/* Header - render first if top corners */}
       {isTop && headerElement}
@@ -2317,11 +2411,11 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
           className="controls-body"
           data-position={isTop ? "top" : "bottom"}
           style={{
-            background: "rgba(0, 0, 0, 0.5)",
+            background: "rgba(var(--glass-bg-rgb), var(--glass-body-bg-alpha))",
             backdropFilter: "blur(20px)",
             WebkitBackdropFilter: "blur(20px)",
             borderRadius: getBodyBorderRadius(),
-            border: "1px solid rgba(255, 255, 255, 0.15)",
+            border: "1px solid rgba(var(--glass-fg-rgb), var(--glass-border-alpha))",
             borderTop: isTop ? "none" : undefined,
             borderBottom: !isTop ? "none" : undefined,
             padding: 16,
@@ -2335,6 +2429,69 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
               : "fadeInUp 180ms cubic-bezier(0.16, 1, 0.3, 1)",
           }}
         >
+          <div style={{ marginBottom: 12 }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: "rgba(var(--glass-fg-rgb), 0.55)",
+                marginBottom: 8,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              Theme
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {GLASS_THEME_OPTIONS.map(({ id, label }) => {
+                const isActive = glassTheme === id;
+                return (
+                  <button
+                    key={id}
+                    className="section-tab"
+                    type="button"
+                    data-active={isActive}
+                    onClick={() => setGlassTheme(id)}
+                    style={{
+                      padding: "6px 10px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      background: isActive
+                        ? "rgba(var(--glass-fg-rgb), var(--glass-tab-active-bg-alpha))"
+                        : "rgba(var(--glass-fg-rgb), var(--glass-tab-inactive-bg-alpha))",
+                      border: isActive
+                        ? "1px solid rgba(var(--glass-fg-rgb), var(--glass-tab-active-border-alpha))"
+                        : "1px solid rgba(var(--glass-fg-rgb), var(--glass-tab-inactive-border-alpha))",
+                      borderRadius: 6,
+                      color: isActive
+                        ? "rgba(var(--glass-fg-rgb), 0.96)"
+                        : "rgba(var(--glass-fg-rgb), 0.68)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+              <button
+                className="section-tab"
+                type="button"
+                onClick={syncThemeWithVSCode}
+                style={{
+                  padding: "6px 10px",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  background: "rgba(var(--glass-fg-rgb), var(--glass-tab-inactive-bg-alpha))",
+                  border: "1px solid rgba(var(--glass-fg-rgb), var(--glass-tab-inactive-border-alpha))",
+                  borderRadius: 6,
+                  color: "rgba(var(--glass-fg-rgb), 0.72)",
+                  cursor: "pointer",
+                }}
+              >
+                Match VS Code
+              </button>
+            </div>
+          </div>
+
           {/* Section Tabs - Emil Kowalski's subtle scale on press */}
           <div
             style={{
@@ -2354,10 +2511,16 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
                   padding: "6px 10px",
                   fontSize: 11,
                   fontWeight: 500,
-                  background: activeSection === id ? "rgba(255, 255, 255, 0.2)" : "rgba(255, 255, 255, 0.05)",
-                  border: activeSection === id ? "1px solid rgba(255, 255, 255, 0.3)" : "1px solid rgba(255, 255, 255, 0.1)",
+                  background: activeSection === id
+                    ? "rgba(var(--glass-fg-rgb), var(--glass-tab-active-bg-alpha))"
+                    : "rgba(var(--glass-fg-rgb), var(--glass-tab-inactive-bg-alpha))",
+                  border: activeSection === id
+                    ? "1px solid rgba(var(--glass-fg-rgb), var(--glass-tab-active-border-alpha))"
+                    : "1px solid rgba(var(--glass-fg-rgb), var(--glass-tab-inactive-border-alpha))",
                   borderRadius: 6,
-                  color: activeSection === id ? "rgba(255, 255, 255, 0.95)" : "rgba(255, 255, 255, 0.6)",
+                  color: activeSection === id
+                    ? "rgba(var(--glass-fg-rgb), 0.95)"
+                    : "rgba(var(--glass-fg-rgb), 0.6)",
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
@@ -2404,7 +2567,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
                 <div
                   style={{
                     fontSize: 11,
-                    color: "rgba(255, 255, 255, 0.5)",
+                    color: "rgba(var(--glass-fg-rgb), 0.5)",
                     marginBottom: 6,
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",
@@ -2422,21 +2585,17 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
                     width: "100%",
                     padding: "8px 10px",
                     fontSize: 13,
-                    background: "rgba(255, 255, 255, 0.08)",
-                    border: "1px solid rgba(255, 255, 255, 0.15)",
+                    background: "rgba(var(--glass-fg-rgb), var(--glass-input-bg-alpha))",
+                    border: "1px solid rgba(var(--glass-fg-rgb), var(--glass-border-alpha))",
                     borderRadius: 6,
-                    color: "rgba(255, 255, 255, 0.95)",
+                    color: "rgba(var(--glass-fg-rgb), 0.95)",
                     cursor: "pointer",
                     outline: "none",
-                    appearance: "none",
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.6)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
-                    backgroundRepeat: "no-repeat",
-                    backgroundPosition: "right 10px center",
-                    paddingRight: 30,
+                    paddingRight: 12,
                   }}
                 >
-                  <option value={0} style={{ background: "#1a1a1a", color: "#fff" }}>Rectangle</option>
-                  <option value={1} style={{ background: "#1a1a1a", color: "#fff" }}>Triangle</option>
+                  <option value={0} style={{ background: "var(--glass-select-option-bg)", color: "var(--glass-select-option-text)" }}>Rectangle</option>
+                  <option value={1} style={{ background: "var(--glass-select-option-bg)", color: "var(--glass-select-option-text)" }}>Triangle</option>
                 </select>
               </div>
             )}
@@ -2452,8 +2611,8 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
                     marginBottom: 6,
                   }}
                 >
-                  <span style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.7)" }}>Size</span>
-                  <span style={{ fontSize: 11, color: "rgba(255, 255, 255, 0.4)", fontFamily: "monospace" }}>
+                  <span style={{ fontSize: 12, color: "rgba(var(--glass-fg-rgb), 0.7)" }}>Size</span>
+                  <span style={{ fontSize: 11, color: "rgba(var(--glass-fg-rgb), 0.4)", fontFamily: "monospace" }}>
                     {params.cols}
                   </span>
                 </div>
@@ -2470,7 +2629,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
                   style={{
                     width: "100%",
                     height: 4,
-                    background: `linear-gradient(to right, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.4) ${((params.cols - 4) / 56) * 100}%, rgba(255, 255, 255, 0.1) ${((params.cols - 4) / 56) * 100}%, rgba(255, 255, 255, 0.1) 100%)`,
+                    background: `linear-gradient(to right, rgba(var(--glass-fg-rgb), var(--glass-track-active-alpha)) 0%, rgba(var(--glass-fg-rgb), var(--glass-track-active-alpha)) ${((params.cols - 4) / 56) * 100}%, rgba(var(--glass-fg-rgb), var(--glass-track-inactive-alpha)) ${((params.cols - 4) / 56) * 100}%, rgba(var(--glass-fg-rgb), var(--glass-track-inactive-alpha)) 100%)`,
                     borderRadius: 2,
                     cursor: "pointer",
                   }}
@@ -2498,7 +2657,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
                   >
                     <label
                       style={{
-                        color: "rgba(255, 255, 255, 0.8)",
+                        color: "rgba(var(--glass-fg-rgb), 0.8)",
                         fontSize: 12,
                         fontWeight: 500,
                       }}
@@ -2508,10 +2667,10 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
                     <span
                       className="value-badge"
                       style={{
-                        color: "rgba(255, 255, 255, 0.5)",
+                        color: "rgba(var(--glass-fg-rgb), 0.5)",
                         fontSize: 11,
                         fontFamily: "monospace",
-                        background: "rgba(255, 255, 255, 0.1)",
+                        background: "rgba(var(--glass-fg-rgb), var(--glass-value-bg-alpha))",
                         padding: "2px 6px",
                         borderRadius: 4,
                       }}
@@ -2531,7 +2690,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
                       height: 6,
                       borderRadius: 3,
                       appearance: "none",
-                      background: `linear-gradient(to right, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.35) ${((params[key] as number - min) / (max - min)) * 100}%, rgba(255, 255, 255, 0.12) ${((params[key] as number - min) / (max - min)) * 100}%, rgba(255, 255, 255, 0.12) 100%)`,
+                      background: `linear-gradient(to right, rgba(var(--glass-fg-rgb), var(--glass-track-active-alpha)) 0%, rgba(var(--glass-fg-rgb), var(--glass-track-active-alpha)) ${((params[key] as number - min) / (max - min)) * 100}%, rgba(var(--glass-fg-rgb), var(--glass-track-inactive-alpha)) ${((params[key] as number - min) / (max - min)) * 100}%, rgba(var(--glass-fg-rgb), var(--glass-track-inactive-alpha)) 100%)`,
                       cursor: "pointer",
                       outline: "none",
                     }}
@@ -2642,7 +2801,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
           transform: scale(0.97);
         }
         .section-tab[data-active="true"] {
-          box-shadow: 0 2px 8px rgba(255, 255, 255, 0.1);
+          box-shadow: 0 2px 8px rgba(var(--glass-fg-rgb), 0.1);
         }
         
         /* Header button with press effect */
@@ -2659,24 +2818,24 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
           transition: box-shadow 200ms var(--ease-out-expo);
         }
         .color-picker-wrapper:hover {
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+          box-shadow: 0 4px 12px rgba(var(--glass-shadow-rgb), 0.3);
         }
 
-        /* Force dark mode for react-color SketchPicker */
+        /* Keep picker aligned with active Glass window theme */
         .sketch-picker {
-          background: #1a1a1a !important;
+          background: var(--glass-picker-bg) !important;
         }
         .sketch-picker input {
-          background: #2a2a2a !important;
-          color: #ffffff !important;
-          border: 1px solid rgba(255, 255, 255, 0.1) !important;
+          background: var(--glass-picker-input-bg) !important;
+          color: var(--glass-picker-text) !important;
+          border: 1px solid rgba(var(--glass-fg-rgb), 0.1) !important;
           box-shadow: none !important;
         }
         .sketch-picker label {
-          color: rgba(255, 255, 255, 0.6) !important;
+          color: rgba(var(--glass-fg-rgb), 0.6) !important;
         }
         .sketch-picker span {
-          color: rgba(255, 255, 255, 0.6) !important;
+          color: rgba(var(--glass-fg-rgb), 0.6) !important;
         }
 
         /* Slider thumb with enhanced interactions */
@@ -2688,29 +2847,29 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
           width: 14px;
           height: 14px;
           border-radius: 50%;
-          background: white;
+          background: var(--glass-slider-thumb-color);
           cursor: pointer;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+          box-shadow: 0 2px 6px rgba(var(--glass-shadow-rgb), 0.3);
           transition: transform 150ms var(--spring),
                       box-shadow 150ms var(--ease-out-expo);
           will-change: transform;
         }
         input[type="range"]::-webkit-slider-thumb:hover {
           transform: scale(1.2);
-          box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+          box-shadow: 0 3px 10px rgba(var(--glass-shadow-rgb), 0.4);
         }
         input[type="range"]::-webkit-slider-thumb:active {
           transform: scale(1.15);
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+          box-shadow: 0 2px 8px rgba(var(--glass-shadow-rgb), 0.5);
         }
         input[type="range"]::-moz-range-thumb {
           width: 14px;
           height: 14px;
           border-radius: 50%;
-          background: white;
+          background: var(--glass-slider-thumb-color);
           cursor: pointer;
           border: none;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+          box-shadow: 0 2px 6px rgba(var(--glass-shadow-rgb), 0.3);
           transition: transform 150ms var(--spring);
         }
         input[type="range"]::-moz-range-thumb:hover {
@@ -2730,7 +2889,7 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
           transition: background 200ms var(--ease-out-expo);
         }
         .panel-header:hover {
-          background: rgba(0, 0, 0, 0.65);
+          background: rgba(var(--glass-bg-rgb), var(--glass-header-hover-alpha));
         }
         
         /* Controls body smooth entrance */
@@ -2756,6 +2915,82 @@ function ControlPanel({ params, onChange, onReset, onSave }: ControlPanelProps) 
 const STORAGE_KEY = "glassBarShaderParams_v7";
 const CORNER_STORAGE_KEY = "glassBarShaderCorner";
 const COLLAPSED_STORAGE_KEY = "glassBarShaderCollapsed";
+const THEME_STORAGE_KEY = "glassBarShaderTheme_v1";
+
+function isGlassTheme(value: string | null): value is GlassTheme {
+  return value === "light" || value === "dark" || value === "high-contrast";
+}
+
+function detectVSCodeThemeCategory(): GlassTheme {
+  if (typeof window === "undefined") return "dark";
+
+  const bodyClasses = document.body?.classList;
+  const rootClasses = document.documentElement.classList;
+  const classNames = new Set<string>([
+    ...(bodyClasses ? Array.from(bodyClasses) : []),
+    ...Array.from(rootClasses),
+  ]);
+
+  if (
+    classNames.has("vscode-high-contrast") ||
+    classNames.has("vscode-high-contrast-light")
+  ) {
+    return "high-contrast";
+  }
+  if (classNames.has("vscode-light")) return "light";
+  if (classNames.has("vscode-dark")) return "dark";
+
+  const themeHints = [
+    document.body?.dataset.vscodeThemeKind,
+    document.documentElement.dataset.vscodeThemeKind,
+    document.body?.dataset.vscodeThemeName,
+    document.documentElement.dataset.vscodeThemeName,
+    document.body?.dataset.vscodeThemeClass,
+    document.documentElement.dataset.vscodeThemeClass,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (themeHints.includes("high") && themeHints.includes("contrast")) return "high-contrast";
+  if (themeHints.includes("light")) return "light";
+  if (themeHints.includes("dark")) return "dark";
+
+  if (window.matchMedia("(forced-colors: active)").matches) {
+    return "high-contrast";
+  }
+  if (window.matchMedia("(prefers-contrast: more)").matches) {
+    return "high-contrast";
+  }
+  if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    return "dark";
+  }
+
+  return "light";
+}
+
+function loadSavedTheme(): GlassTheme {
+  if (typeof window === "undefined") return "dark";
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    if (isGlassTheme(saved)) return saved;
+
+    const detected = detectVSCodeThemeCategory();
+    localStorage.setItem(THEME_STORAGE_KEY, detected);
+    return detected;
+  } catch {
+    return detectVSCodeThemeCategory();
+  }
+}
+
+function saveTheme(theme: GlassTheme): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function loadSavedParams(): ShaderParams {
   if (typeof window === "undefined") return defaultParams;
